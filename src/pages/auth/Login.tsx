@@ -146,7 +146,7 @@ export default function Login() {
             <span className="sdu-badge">
               <i>SDU</i> my.sdu.edu.kz account
             </span>
-            <h2 style={{ marginTop: 18 }}>Sign in</h2>
+            <h2 style={{ marginTop: 18 }}>Welcome back 👋</h2>
             <p className="sub">Use the same student ID and password as on my.sdu.edu.kz. First sign-in creates your account.</p>
 
             <div style={{ marginTop: 22 }}>

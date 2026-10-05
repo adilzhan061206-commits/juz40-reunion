@@ -70,7 +70,7 @@ export default function Dashboard() {
               {DAYS_LONG[data.today]} · {data.current_term?.name ?? 'No active term'}
             </div>
             <h1 style={{ marginTop: 10 }}>
-              {greeting()}, {first}
+              {greeting()}, {first} 👋
             </h1>
             <p className="lead">
               {up && up.term.registration_open

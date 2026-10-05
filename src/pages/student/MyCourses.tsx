@@ -99,7 +99,7 @@ export default function MyCourses() {
     <>
       <PageHead
         eyebrow={`${data.term.name} · ${seasonLabel} term`}
-        title="My courses"
+        title="📚 My courses"
         lead={
           data.season
             ? `${seasonLabel} terms only run semesters ${data.allowed_semesters.join(', ')} of your curriculum. Tick the courses you want to take in ${data.term.name} and build a conflict-free schedule from them.`

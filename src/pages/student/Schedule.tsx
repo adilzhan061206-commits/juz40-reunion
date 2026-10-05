@@ -112,7 +112,7 @@ export default function Schedule() {
     <>
       <PageHead
         eyebrow={data.term.name}
-        title="Register & confirm"
+        title="✅ Register & confirm"
         lead="Step 3 of 3. Draft sections are dashed — press Register to enroll, then confirm the schedule and export it to your calendar. Overlaps are striped red with one-click fixes."
         actions={
           <>

@@ -37,7 +37,7 @@ export default function Degree() {
     <>
       <PageHead
         eyebrow={data.program ? (data.program.personal ? 'Personal curriculum' : 'Degree programme') : undefined}
-        title={data.program?.name ?? 'Degree progress'}
+        title={`🎓 ${data.program?.name ?? 'Degree progress'}`}
         lead="Your transcript from my.sdu.edu.kz mapped against every requirement of your programme — what's done, what's in progress, and exactly what is left."
       />
 

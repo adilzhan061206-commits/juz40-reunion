@@ -4,6 +4,7 @@ import './styles/tokens.css'
 import './styles/base.css'
 import './styles/components.css'
 import './styles/features.css'
+import './styles/bright.css'
 import App from './App.tsx'
 import { AppProvider, ToastProvider } from './context/app'
 

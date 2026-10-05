@@ -34,7 +34,7 @@ export default function AuthShell({ children }: { children: ReactNode }) {
 
         <div style={{ position: 'relative', zIndex: 1 }}>
           <h1>
-            Your semester, <em>planned</em> before the rush.
+            Your semester, <em>sorted</em> ✨ before the rush.
           </h1>
           <p className="lead">
             Sign in with your my.sdu.edu.kz account — your courses, grades and timetable are pulled in automatically.

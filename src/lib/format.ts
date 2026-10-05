@@ -18,7 +18,7 @@ export function kindLabel(kind: string): string {
 }
 
 // Harmonious course colours that work on both the dark board and paper.
-const PALETTE = ['#e8a33d', '#5b74f0', '#2fae7b', '#e0566b', '#9a6bf0', '#1fa3b8', '#e07a3d', '#c556a8', '#6f9a2c', '#4d8bd6']
+const PALETTE = ['#8b5cf6', '#ec4899', '#f97316', '#10b981', '#0ea5e9', '#f59e0b', '#ef4444', '#14b8a6', '#6366f1', '#d946ef']
 
 export function courseColor(code: string): string {
   let hash = 0
@@ -55,7 +55,7 @@ export function ects(value: number): string {
 
 export function greeting(): string {
   const h = new Date().getHours()
-  return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  return h < 5 ? 'Late night' : h < 12 ? 'Good morning' : h < 18 ? 'Hey' : 'Good evening'
 }
 
 export function plural(n: number, word: string): string {

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Course, Prerequisite, Section, Term, User
 from .audit import build_audit
+from .season import fits_term
 from .registration import cart_sections, check_prerequisites, course_history, enrolled_sections, passed_course_ids
 
 CATEGORY_WEIGHT = {"core": 40, "science": 32, "general": 22, "elective": 16}
@@ -43,7 +44,7 @@ def recommend(db: Session, user: User, term: Term, limit: int = 8) -> dict:
                 continue
             seen.add(cid)
             course = db.get(Course, cid)
-            if cid not in offered:
+            if cid not in offered or not fits_term(term, item["semester"]):
                 continue
             prereq = check_prerequisites(db, user, course, term, history=history,
                                          same_term_course_ids=this_term | in_cart)

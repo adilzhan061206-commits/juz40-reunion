@@ -127,8 +127,8 @@ export default function Generator() {
     <>
       <PageHead
         eyebrow={term?.name}
-        title="Auto Scheduler"
-        lead="Pick your courses and preferred time slots. Every combination is checked in real time, and only schedules with zero overlaps are shown."
+        title="Build schedule"
+        lead={<>Step 2 of 3. Set your preferred days and hours — every section combination is checked in real time and only timetables with zero overlaps are shown. Change the course list in <Link to="/my-courses" className="link">My courses</Link>.</>}
         actions={
           <Button icon={<Sparkles />} onClick={useRecommendations}>
             Use my recommendations

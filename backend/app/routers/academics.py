@@ -25,13 +25,14 @@ from ..models import (
     now,
 )
 from ..sdu import parsers
-from ..sdu.sync import ImportSummary, ensure_term, import_grades, import_schedule
+from ..sdu.sync import ImportSummary, ensure_term, import_grades, import_schedule, import_sdu_curriculum
 from ..serializers import notification_out, request_out, sections_out, term_out
 from ..services import registration as reg
 from ..services.audit import build_audit
 from ..services.curriculum import import_curriculum, remove_personal_curriculum
 from ..services.notify import notify
 from ..services.recommend import recommend
+from ..services.season import SEASON_SEMESTERS, curriculum_semesters, fits_term, term_season
 
 router = APIRouter(prefix="/api", tags=["academics"])
 student = require_role("student")
@@ -78,6 +79,112 @@ def dashboard(user: User = Depends(student), db: Session = Depends(get_db)):
     }
 
 
+# ---------------------------------------------------------------- my courses (done / now / next)
+
+
+@router.get("/my-courses")
+def my_courses(term_id: int | None = None, user: User = Depends(student), db: Session = Depends(get_db)):
+    """Everything a student needs to pick next term's courses: what is done, what is running now,
+    and which curriculum courses fit the selected term (fall = odd semesters, spring = even)."""
+    term = get_term(db, term_id)
+    season = term_season(term)
+    semesters = curriculum_semesters(db, user)
+    history = reg.course_history(db, user.id, term)
+    passed = reg.passed_course_ids(db, user.id)
+    in_progress = history[1] - passed
+    enrolled_here = {s.course_id for s in reg.enrolled_sections(db, user.id, term.id)}
+    in_cart = {s.course_id for s in reg.cart_sections(db, user.id, term.id)}
+    offered: dict[int, dict] = {}
+    sections = db.scalars(select(Section).where(Section.term_id == term.id)).all()
+    taken, _ = reg.seat_counts(db, [s.id for s in sections])
+    for s in sections:
+        info = offered.setdefault(s.course_id, {"sections": 0, "open_seats": 0})
+        info["sections"] += 1
+        info["open_seats"] += max(0, s.capacity - taken.get(s.id, 0)) if s.kind == "lecture" else 0
+    for cid, info in offered.items():
+        if info["open_seats"] == 0:  # courses without lectures: count any open seat
+            info["open_seats"] = sum(max(0, s.capacity - taken.get(s.id, 0)) for s in sections if s.course_id == cid)
+
+    entries = db.scalars(select(TranscriptEntry).where(TranscriptEntry.user_id == user.id)).all()
+    grades = {e.course_id: e for e in entries}
+    completed = sorted(
+        ({"course_id": e.course_id, "code": e.course.code, "title": e.course.title, "ects": e.course.ects,
+          "grade": e.grade, "term": e.term_code, "semester": semesters.get(e.course_id)}
+         for e in entries if e.status == "completed"),
+        key=lambda r: (r["semester"] or 99, r["code"]),
+    )
+    current = []
+    for cid in sorted(in_progress, key=lambda c: semesters.get(c, 99)):
+        course = db.get(Course, cid)
+        current.append({"course_id": cid, "code": course.code, "title": course.title, "ects": course.ects,
+                        "semester": semesters.get(cid)})
+
+    audit = build_audit(db, user, upcoming=term)
+    expected = int(audit["totals"]["completed"] // 30) + 1
+    now_list, later, electives = [], [], []
+    seen: set[int] = set()
+    same_term = enrolled_here | in_cart
+    for group in audit["groups"]:
+        missing = [i for i in group["items"] if i["status"] == "missing"]
+        if group["kind"] == "elective":
+            if group["satisfied"] or group["missing_ects"] <= 0:
+                continue
+            options = []
+            for item in missing:
+                info = offered.get(item["course_id"])
+                if not info or not fits_term(term, item["semester"]):
+                    continue
+                course = db.get(Course, item["course_id"])
+                check = reg.check_prerequisites(db, user, course, term, history=history, same_term_course_ids=same_term)
+                options.append({**_course_item(item, info, check), "in_cart": item["course_id"] in in_cart,
+                                "registered": item["course_id"] in enrolled_here})
+            electives.append({"group": group["name"], "ects_required": group["missing_ects"],
+                              "codes": [i["code"] for i in missing if fits_term(term, i["semester"])],
+                              "semester": next((i["semester"] for i in group["items"] if i["semester"]), None),
+                              "options": options})
+            continue
+        for item in missing:
+            cid = item["course_id"]
+            if cid in seen or cid in in_progress or cid in passed:
+                continue
+            seen.add(cid)
+            if not fits_term(term, item["semester"]):
+                later.append({"course_id": cid, "code": item["code"], "title": item["title"], "ects": item["ects"],
+                              "semester": item["semester"]})
+                continue
+            course = db.get(Course, cid)
+            check = reg.check_prerequisites(db, user, course, term, history=history, same_term_course_ids=same_term)
+            entry = {**_course_item(item, offered.get(cid), check), "group": group["name"],
+                     "in_cart": cid in in_cart, "registered": cid in enrolled_here}
+            entry["suggested"] = bool(entry["offered"] and not check.blocked and (item["semester"] or 0) <= expected + 1)
+            now_list.append(entry)
+    now_list.sort(key=lambda e: (not e["suggested"], e["semester"] or 99, e["code"]))
+    later.sort(key=lambda e: (e["semester"] or 99, e["code"]))
+    return {
+        "term": term_out(term),
+        "season": season,
+        "allowed_semesters": SEASON_SEMESTERS.get(season or "", []),
+        "current_semester": expected,
+        "program": audit["program"],
+        "warnings": audit["warnings"],
+        "totals": audit["totals"],
+        "completed": completed,
+        "in_progress": current,
+        "next": now_list,
+        "electives": electives,
+        "later": later,
+        "has_grades": bool(grades),
+    }
+
+
+def _course_item(item: dict, info: dict | None, check) -> dict:
+    return {
+        "course_id": item["course_id"], "code": item["code"], "title": item["title"], "ects": item["ects"],
+        "semester": item["semester"], "offered": bool(info), "sections": info["sections"] if info else 0,
+        "open_seats": info["open_seats"] if info else 0, "prerequisite": check.as_dict(),
+    }
+
+
 # ---------------------------------------------------------------- audit & recommendations
 
 
@@ -117,7 +224,7 @@ def curriculum_delete(user: User = Depends(student), db: Session = Depends(get_d
 
 
 class SduHtmlIn(BaseModel):
-    kind: str = Field(pattern="^(schedule|grades)$")
+    kind: str = Field(pattern="^(schedule|grades|curriculum)$")
     html: str = Field(min_length=20, max_length=3_000_000)
     term_code: str | None = Field(default=None, pattern=r"^\d{4}-[123]$")
 
@@ -139,6 +246,11 @@ def sdu_import_html(payload: SduHtmlIn, user: User = Depends(student), db: Sessi
             raise HTTPException(422, "Choose the term this schedule belongs to.")
         summary.term = term.name
         import_schedule(db, user, term, classes, summary)
+    elif payload.kind == "curriculum":
+        curriculum = parsers.parse_curriculum(payload.html)
+        if len(curriculum.rows) < 3:
+            raise HTTPException(422, "No curriculum tables were found. Open “My Curriculum” on my.sdu and copy the whole page.")
+        summary.curriculum = import_sdu_curriculum(db, user, curriculum)
     else:
         rows = parsers.parse_grade_rows(payload.html, term_code=payload.term_code or "")
         if not rows:

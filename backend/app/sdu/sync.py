@@ -33,6 +33,7 @@ class ImportSummary:
     sections: int = 0
     enrollments: int = 0
     transcript: int = 0
+    curriculum: int = 0
     warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -42,6 +43,7 @@ class ImportSummary:
             "sections": self.sections,
             "enrollments": self.enrollments,
             "transcript": self.transcript,
+            "curriculum": self.curriculum,
             "warnings": self.warnings,
         }
 
@@ -178,6 +180,14 @@ def import_grades(db: Session, user: User, rows: list[parsers.GradeRow], current
     db.flush()
 
 
+def import_sdu_curriculum(db: Session, user: User, curriculum: parsers.Curriculum) -> int:
+    """Store the student's own curriculum as a personal programme (replacing a previous one)."""
+    from ..services.curriculum import import_parsed, sdu_curriculum_groups
+
+    result = import_parsed(db, user, sdu_curriculum_groups(curriculum), commit=False)
+    return result["courses"]
+
+
 def match_program(db: Session, label: str) -> Program | None:
     label = (label or "").lower()
     if not label:
@@ -204,6 +214,8 @@ def import_snapshot(db: Session, user: User, snapshot: SduSnapshot) -> ImportSum
         summary.term = term.name
         import_schedule(db, user, term, snapshot.classes, summary)
     import_grades(db, user, snapshot.grades, term.code if term else None, summary)
+    if snapshot.curriculum and snapshot.curriculum.rows:
+        summary.curriculum = import_sdu_curriculum(db, user, snapshot.curriculum)
     user.last_sdu_sync = now()
     db.commit()
     return summary

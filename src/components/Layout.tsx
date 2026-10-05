@@ -12,6 +12,7 @@ import {
   GraduationCap,
   Inbox,
   LayoutDashboard,
+  ListChecks,
   LogOut,
   Menu,
   Monitor,
@@ -39,23 +40,24 @@ interface NavItem {
 
 const NAV: Record<string, { label: string; items: NavItem[] }[]> = {
   student: [
-    { label: 'Overview', items: [{ to: '/', label: 'Dashboard', icon: <LayoutDashboard />, end: true }] },
     {
-      label: 'Plan',
+      label: 'Registration',
       items: [
-        { to: '/recommendations', label: 'Recommendations', icon: <Sparkles /> },
-        { to: '/generator', label: 'Auto Scheduler', icon: <Wand2 /> },
-        { to: '/degree', label: 'Degree Progress', icon: <GraduationCap /> },
-        { to: '/planner', label: 'Multi-term Planner', icon: <CalendarRange /> },
+        { to: '/', label: 'Home', icon: <LayoutDashboard />, end: true },
+        { to: '/my-courses', label: '1 · My courses', icon: <ListChecks /> },
+        { to: '/generator', label: '2 · Build schedule', icon: <Wand2 /> },
+        { to: '/schedule', label: '3 · Register & confirm', icon: <CalendarDays /> },
       ],
     },
     {
-      label: 'Register',
+      label: 'More',
       items: [
-        { to: '/registration', label: 'Course Registration', icon: <BookOpen /> },
-        { to: '/schedule', label: 'My Schedule', icon: <CalendarDays /> },
-        { to: '/waitlists', label: 'Waitlists & Alerts', icon: <BellRing /> },
-        { to: '/requests', label: 'Advisor Requests', icon: <FileCheck2 /> },
+        { to: '/registration', label: 'Course catalogue', icon: <BookOpen /> },
+        { to: '/degree', label: 'Degree progress', icon: <GraduationCap /> },
+        { to: '/recommendations', label: 'Recommendations', icon: <Sparkles /> },
+        { to: '/planner', label: 'Future semesters', icon: <CalendarRange /> },
+        { to: '/waitlists', label: 'Waitlists & alerts', icon: <BellRing /> },
+        { to: '/requests', label: 'Advisor requests', icon: <FileCheck2 /> },
       ],
     },
     { label: 'Account', items: [{ to: '/profile', label: 'Profile & SDU sync', icon: <UserCog /> }] },
@@ -85,13 +87,14 @@ const NAV: Record<string, { label: string; items: NavItem[] }[]> = {
 }
 
 const TITLES: Record<string, string> = {
-  '/': 'Dashboard',
+  '/': 'Home',
+  '/my-courses': 'My courses',
   '/recommendations': 'Recommendations',
-  '/generator': 'Auto Scheduler',
-  '/degree': 'Degree Progress',
-  '/planner': 'Multi-term Planner',
-  '/registration': 'Course Registration',
-  '/schedule': 'My Schedule',
+  '/generator': 'Build schedule',
+  '/degree': 'Degree progress',
+  '/planner': 'Future semesters',
+  '/registration': 'Course catalogue',
+  '/schedule': 'Register & confirm',
   '/waitlists': 'Waitlists & Alerts',
   '/requests': 'Advisor Requests',
   '/profile': 'Profile',

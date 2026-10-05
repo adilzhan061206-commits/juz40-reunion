@@ -33,6 +33,7 @@ from .models import (
     now,
 )
 from .security import hash_password
+from .services.season import semester_season, term_season
 
 log = logging.getLogger("registration.seed")
 
@@ -131,7 +132,7 @@ INSTRUCTORS = {
 }
 ROOMS = ["A101", "A204", "B112", "B305", "C210", "D102", "E221", "E305", "F105", "F201", "G301", "G304"]
 SLOTS = [8 * 60 + 30 + 60 * i for i in range(10)]  # 08:30 .. 17:30, 50-minute periods
-FULL_SECTIONS_2027 = {("CSS 318", "01-N"), ("CSS 318", "02-N"), ("CSS 318", "01-L"), ("CSS 318", "02-L"),
+FULL_SECTIONS_2027 = {("CSS 342", "01-N"), ("CSS 342", "02-N"), ("CSS 342", "01-L"), ("CSS 342", "02-L"),
                       ("CSS 222", "01-P")}
 
 FIRST_NAMES = ["Aibek", "Aizere", "Alikhan", "Amina", "Arman", "Aruzhan", "Asel", "Bekzat", "Dana", "Daniyar",
@@ -225,12 +226,17 @@ def seed(db: Session) -> None:
 
     rng = random.Random(2026)
     sections_by_term: dict[str, list[Section]] = {}
-    projected = {"CSS 105", "CSS 106", "CSS 215", "CSS 222", "CSS 302", "CSS 309", "CSS 311", "CSS 318", "CSS 350",
-                 "MAT 151", "MAT 251", "ENG 101", "BUS 101", "ACC 201", "FIN 301", "CSS 401"}
+    # Fall terms (code "-1") offer odd-semester courses, spring terms ("-2") even-semester ones.
+    semester_of: dict[str, int] = {}
+    for groups in (CS_PROGRAM, BUS_PROGRAM):
+        for *_, items in groups:
+            for code, semester in items:
+                semester_of[code] = min(semester, semester_of.get(code, semester))
     for tcode in ("2025-1", "2025-2", "2026-1", "2026-2", "2027-1"):
         sections_by_term[tcode] = []
         for code, course in courses.items():
-            if tcode == "2027-1" and code not in projected:
+            semester = semester_of.get(code)
+            if semester and semester_season(semester) != term_season(terms[tcode]):
                 continue
             if tcode.startswith("2025") and code.startswith(("CSS 3", "CSS 4")):
                 continue
@@ -286,7 +292,7 @@ def seed(db: Session) -> None:
 
     for code in ("CSS 215", "CSS 225", "MAT 201", "SOC 101"):
         enroll_course(student, "2026-1", code)
-    for code in ("ACC 201", "MKT 202", "ENG 102"):
+    for code in ("MKT 202", "MGT 305", "SOC 101"):
         enroll_course(bus_student, "2026-1", code)
     db.flush()
 
@@ -300,7 +306,7 @@ def seed(db: Session) -> None:
     db.add_all(classmates)
     db.flush()
     for i, classmate in enumerate(classmates):
-        for code in rng.sample(["CSS 215", "CSS 225", "MAT 201", "SOC 101", "CSS 217", "CSS 231"], 3):
+        for code in rng.sample(["CSS 215", "CSS 225", "MAT 201", "SOC 101", "CSS 361", "CSS 324"], 3):
             enroll_course(classmate, "2026-1", code)
         db.add(TranscriptEntry(user_id=classmate.id, course_id=courses["CSS 105"].id, term_code="2025-1",
                                grade="B", status="completed"))
@@ -313,13 +319,13 @@ def seed(db: Session) -> None:
         for classmate in classmates[: section.capacity]:
             db.add(Enrollment(user_id=classmate.id, section_id=section.id, source="portal"))
     db.flush()
-    ml_lecture = pick("2026-2", "CSS 318", "lecture")
+    ml_lecture = pick("2026-2", "CSS 342", "lecture")
     for offset, classmate in enumerate(classmates[10:12]):
         db.add(WaitlistEntry(user_id=classmate.id, section_id=ml_lecture.id, created_at=now() - 3600 * (5 - offset)))
     db.add(SeatAlert(user_id=classmates[13].id, section_id=ml_lecture.id, channels="push,email"))
 
     db.add(OverrideRequest(student_id=classmates[3].id, term_id=terms["2026-2"].id, kind="prerequisite_waiver",
-                           course_id=courses["CSS 302"].id,
+                           course_id=courses["CSS 350"].id,
                            reason="I completed an operating systems course during my exchange semester at TU Berlin "
                                   "and attached the syllabus. Requesting a waiver for CSS 231."))
     db.add(OverrideRequest(student_id=classmates[5].id, term_id=terms["2026-2"].id, kind="credit_overload",

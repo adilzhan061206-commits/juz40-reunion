@@ -15,7 +15,8 @@ from app.sdu import parsers
 LOGIN_PAGE = """<html><body><form action="loginAuth.php" method="post">
 <input name="username"><input type="password" name="password"><input type="submit" name="LogIn" value="Log in">
 </form></body></html>"""
-HOME = """<html><body><a href="index.php?mod=schedule">Schedule</a><a href="logout.php">Logout</a>
+HOME = """<html><body><a href="index.php?mod=schedule">Schedule</a><a href="index.php?mod=ejurnal_curr">My Curriculum</a>
+<a href="logout.php">Logout</a>
 <div>Name Surname : Aliya Sarsenova Advisor : S. Akhmetova Major Program : BSc Computer Science
 Last Login : 05.10.2026</div></body></html>"""
 OTP_PAGE = """<html><body><p>We sent a 6-digit verification code to your e-mail.</p>
@@ -62,7 +63,10 @@ def fake_portal(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=LOGIN_PAGE)
     if path == "/index.php" and request.method == "GET":
         module = request.url.params.get("mod", "")
-        pages = {"": HOME, "schedule": SCHEDULE_PAGE, "grades": SCHEDULE_PAGE, "transkript": TRANSCRIPT}
+        from test_my_courses_and_curriculum import CURRICULUM_HTML
+
+        pages = {"": HOME, "schedule": SCHEDULE_PAGE, "grades": SCHEDULE_PAGE, "transkript": TRANSCRIPT,
+                 "ejurnal_curr": CURRICULUM_HTML}
         return httpx.Response(200, text=pages.get(module, HOME))
     if path == "/index.php":
         if first.get("action") == "showSchedule":
@@ -124,7 +128,10 @@ def test_sdu_login_creates_account_and_imports_courses(client, db, portal):
     data = response.json()
     assert data["status"] == "ok" and data["created"] is True
     assert data["user"]["name"] == "Aliya Sarsenova"
-    assert data["user"]["program"]["name"] == "BSc Computer Science"
+    # "My Curriculum" was found through the portal menu and became the student's personal programme.
+    assert data["user"]["program"]["name"] == "2024-Information Systems (EN)"
+    assert data["user"]["program"]["personal"] is True
+    assert data["sync"]["curriculum"] >= 5
     assert data["sync"]["term"] == "Fall 2026"
 
     student = db.scalar(select(User).where(User.sdu_id == "230107777"))

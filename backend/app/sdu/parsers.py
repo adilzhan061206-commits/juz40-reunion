@@ -469,3 +469,116 @@ def parse_grade_rows(html: str, term_code: str = "") -> list[GradeRow]:
             )
         )
     return rows
+
+
+# ---------------------------------------------------------------- curriculum ("My Curriculum" page)
+
+ELECTIVE_TAG_RE = re.compile(r"\[\s*([A-Z]{1,4})\s*\]")
+
+
+@dataclass
+class CurriculumRow:
+    semester: int
+    code: str  # real course code, or "" for an elective slot nobody has chosen yet
+    title: str
+    ects: float | None = None
+    credits: float | None = None
+    grade: str = ""
+    status: str = "not_taken"  # completed | in_progress | failed | not_taken
+    elective_type: str | None = None  # NAE, AE, NTE … for elective slots
+    options: list[str] = field(default_factory=list)  # course codes allowed in an elective slot
+    has_requisites: bool = False
+
+
+@dataclass
+class Curriculum:
+    program: str = ""
+    rows: list[CurriculumRow] = field(default_factory=list)
+
+
+def find_menu_link(html: str, *labels: str) -> str | None:
+    """Return the href of the portal menu entry whose text matches one of ``labels``."""
+    soup = _soup(html)
+    wanted = [label.lower() for label in labels]
+    for anchor in soup.find_all("a", href=True):
+        text = _text(anchor).lower()
+        if any(text == w or text.startswith(w) for w in wanted):
+            return anchor["href"]
+    return None
+
+
+def _row_status(grade: str, status_text: str) -> str:
+    grade = grade.upper()
+    if grade in {"F", "FX", "NP"}:
+        return "failed"
+    if grade == "IP":
+        return "in_progress"
+    if GRADE_RE.match(grade) and grade not in {"W", "I", "AU"}:
+        return "completed"
+    if "taken" in status_text.lower() and "not" not in status_text.lower():
+        return "in_progress"
+    return "not_taken"
+
+
+def parse_curriculum(html: str) -> Curriculum:
+    """Parse my.sdu "My Curriculum": one table per semester (in order), columns
+    № · course code · name · teor · pr · cr · ects · grade · requisites · status · Syllabus."""
+    soup = _soup(html)
+    result = Curriculum()
+    for candidate in soup.find_all(["h1", "h2", "h3", "h4", "div", "span", "b", "font", "td"]):
+        text = _text(candidate)
+        if re.fullmatch(r"\d{4}\s*-\s*.{3,80}", text) and re.search(r"[A-Za-z]{3}", text) and len(text) < 90:
+            result.program = text
+            break
+
+    semester = 0
+    for table in soup.find_all("table"):
+        rows = _table_rows(table)
+        if not rows:
+            continue
+        header = [_text(c).lower() for c in rows[0].find_all(["td", "th"], recursive=False)]
+        if not any("course code" in h or h == "code" for h in header) or "ects" not in header:
+            continue
+        semester += 1
+
+        def col(*names: str) -> int:
+            return next((i for i, h in enumerate(header) if h in names), -1)
+
+        c_code, c_name = col("course code", "code"), col("name", "course name")
+        c_cr, c_ects, c_grade = col("cr", "credits"), col("ects"), col("grade")
+        c_req, c_status = col("requisites", "prerequisites"), col("status")
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"], recursive=False)
+            if len(cells) < max(c_code, c_name, c_ects) + 1:
+                continue
+
+            def cell(i: int) -> str:
+                return _text(cells[i]) if 0 <= i < len(cells) else ""
+
+            code_text, name_text = cell(c_code), cell(c_name)
+            if not code_text and not name_text:
+                continue
+            codes = [f"{a} {b}" for a, b in CODE_RE.findall(code_text.upper())]
+            is_slot = code_text.upper().startswith("XXX") or "[" in name_text
+            tag = ELECTIVE_TAG_RE.search(name_text)
+            title = ELECTIVE_TAG_RE.sub("", name_text).replace("*", "").strip(" -")
+            options: list[str] = []
+            if is_slot:
+                inside = re.search(r"\(([^)]*)\)\s*$", title)
+                if inside:
+                    options = [f"{a} {b}" for a, b in CODE_RE.findall(inside.group(1).upper())]
+                    title = title[: inside.start()].strip()
+            grade = cell(c_grade).upper()
+            result.rows.append(CurriculumRow(
+                semester=semester,
+                code=codes[0] if codes else "",
+                title=title or code_text,
+                ects=_number(cell(c_ects)),
+                credits=_number(cell(c_cr)),
+                grade=grade if GRADE_RE.match(grade) else "",
+                status=_row_status(grade, cell(c_status)),
+                elective_type=tag.group(1) if tag else ("ELECTIVE" if is_slot else None),
+                options=options,
+                has_requisites=bool(cell(c_req)),
+            ))
+    return result

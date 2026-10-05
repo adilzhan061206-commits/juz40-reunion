@@ -120,6 +120,36 @@ def import_curriculum(db: Session, user: User, text: str, filename: str) -> dict
     parsed = _parse(text, filename)
     if not parsed["groups"] or not any(g["courses"] for g in parsed["groups"]):
         raise HTTPException(422, "No courses were found. CSV files need the columns category, code, name, credits.")
+    return import_parsed(db, user, parsed)
+
+
+def sdu_curriculum_groups(curriculum) -> dict:
+    """Turn a parsed my.sdu "My Curriculum" page into the generic group structure.
+
+    Every semester becomes a required group. An elective slot nobody has filled yet becomes its own
+    elective group whose options are the course codes listed on the portal.
+    """
+    semesters: dict[int, dict] = {}
+    slots: list[dict] = []
+    for row in curriculum.rows:
+        raw = {"code": row.code, "name": row.title, "ects": row.ects or 0, "credits": row.credits,
+               "semester": row.semester, "grade": row.grade or None,
+               "completion_status": row.status if row.status in {"completed", "in_progress"} else None}
+        if row.code:
+            group = semesters.setdefault(row.semester, {"name": f"Semester {row.semester}", "category": "core",
+                                                        "kind": "required", "courses": [], "sort": row.semester})
+            group["courses"].append(raw)
+        elif row.options:
+            label = f"{row.title} [{row.elective_type}]" if row.elective_type else row.title
+            slots.append({"name": f"Semester {row.semester} · {label}"[:160], "category": "elective",
+                          "kind": "elective", "ects_required": int(row.ects or 0), "sort": row.semester,
+                          "courses": [{"code": c, "name": row.title, "ects": row.ects or 0, "semester": row.semester}
+                                      for c in row.options]})
+    groups = sorted([*semesters.values(), *slots], key=lambda g: (g["sort"], g["kind"] == "elective"))
+    return {"name": curriculum.program or "My SDU curriculum", "groups": groups}
+
+
+def import_parsed(db: Session, user: User, parsed: dict, commit: bool = True) -> dict:
 
     old = db.scalars(select(Program).where(Program.owner_id == user.id)).all()
     for program in old:
@@ -150,7 +180,7 @@ def import_curriculum(db: Session, user: User, text: str, filename: str) -> dict
             title = str(_get(raw, "name") or "").strip()
             if not code or not title:
                 continue
-            ects = _number(raw.get("ects"), 0) or _number(_get(raw, "credits"), 5)
+            ects = _number(raw["ects"], 0) if raw.get("ects") is not None else _number(_get(raw, "credits"), 5)
             course, _ = ensure_course(db, normalize_code(code), title, ects=ects, source="curriculum")
             if course.id in seen:
                 continue
@@ -179,7 +209,9 @@ def import_curriculum(db: Session, user: User, text: str, filename: str) -> dict
                 if entry.source == "curriculum":
                     entry.status = status
                     entry.grade = (str(raw.get("grade")).strip()[:8] or None) if raw.get("grade") else entry.grade
-        if group["kind"] == "elective":
+        if group.get("ects_required"):
+            rg.ects_required = int(group["ects_required"])
+        elif group["kind"] == "elective":
             rg.ects_required = int(selected_ects)
 
     db.flush()
@@ -198,7 +230,10 @@ def import_curriculum(db: Session, user: User, text: str, filename: str) -> dict
                 db.add(Prerequisite(course_id=course_id, requires_id=required.id, kind="pre"))
 
     user.program_id = program.id
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"program_id": program.id, "name": program.name, "groups": len(parsed["groups"]),
             "courses": course_count, "transcript": transcript}
 

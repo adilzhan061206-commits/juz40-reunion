@@ -81,7 +81,7 @@ export default function Registration() {
     <>
       <PageHead
         eyebrow={term ? `${term.name} · ${term.registration_open ? 'Registration open' : 'Registration closed'}` : undefined}
-        title="Course registration"
+        title="Course catalogue"
         lead="Browse every section offered this term. Prerequisites are checked instantly against your SDU transcript, and full sections can be waitlisted or watched for seat alerts."
       />
 

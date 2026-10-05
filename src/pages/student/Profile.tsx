@@ -191,7 +191,7 @@ function SduSync({ user, onUpdated }: { user: User; onUpdated: (u: User) => void
         {summary && (
           <Notice tone="success" title="Imported:">
             {summary.term ? `${summary.term} schedule · ` : ''}
-            {summary.enrollments} new classes · {summary.transcript} transcript records · {summary.courses} new courses
+            {summary.enrollments} new classes · {summary.transcript} transcript records · {summary.curriculum} curriculum courses
             {summary.warnings.length > 0 && <div className="muted" style={{ marginTop: 4 }}>{summary.warnings.join(' ')}</div>}
           </Notice>
         )}
@@ -227,7 +227,7 @@ function SduSync({ user, onUpdated }: { user: User; onUpdated: (u: User) => void
 function PasteImport() {
   const toast = useToast()
   const [open, setOpen] = useState(false)
-  const [kind, setKind] = useState<'schedule' | 'grades'>('schedule')
+  const [kind, setKind] = useState<'curriculum' | 'schedule' | 'grades'>('curriculum')
   const [html, setHtml] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -235,7 +235,8 @@ function PasteImport() {
     setBusy(true)
     try {
       const result = await post<SyncSummary>('/api/sdu/import-html', { kind, html })
-      toast('success', 'Imported from pasted page', `${result.enrollments} classes · ${result.transcript} transcript records`)
+      toast('success', 'Imported from pasted page',
+        kind === 'curriculum' ? `${result.curriculum} curriculum courses — see My courses` : `${result.enrollments} classes · ${result.transcript} transcript records`)
       setHtml('')
       setOpen(false)
     } catch (e) {
@@ -255,7 +256,7 @@ function PasteImport() {
         </p>
         {open && (
           <>
-            <Segmented value={kind} onChange={setKind} options={[{ value: 'schedule', label: 'Schedule page' }, { value: 'grades', label: 'Grades / transcript' }]} />
+            <Segmented value={kind} onChange={setKind} options={[{ value: 'curriculum', label: 'My Curriculum' }, { value: 'schedule', label: 'Schedule' }, { value: 'grades', label: 'Grades / transcript' }]} />
             <textarea className="textarea mono" style={{ minHeight: 140, fontSize: 12 }} value={html} onChange={(e) => setHtml(e.target.value)} placeholder="<html>…" />
             <div>
               <Button variant="primary" loading={busy} disabled={html.length < 20} onClick={submit}>Import</Button>

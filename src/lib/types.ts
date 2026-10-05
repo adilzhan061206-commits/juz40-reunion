@@ -242,5 +242,6 @@ export interface SyncSummary {
   sections: number
   enrollments: number
   transcript: number
+  curriculum: number
   warnings: string[]
 }

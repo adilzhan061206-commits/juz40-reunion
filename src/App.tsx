@@ -8,6 +8,7 @@ import { ForgotPassword, ResetPassword } from './pages/auth/Recover'
 import type { Role } from './lib/types'
 
 const Dashboard = lazy(() => import('./pages/student/Dashboard'))
+const MyCourses = lazy(() => import('./pages/student/MyCourses'))
 const Registration = lazy(() => import('./pages/student/Registration'))
 const Schedule = lazy(() => import('./pages/student/Schedule'))
 const Generator = lazy(() => import('./pages/student/Generator'))
@@ -76,6 +77,7 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route element={<RequireAuth><Layout /></RequireAuth>}>
           <Route index element={page(<Home />)} />
+          <Route path="my-courses" element={<RequireAuth roles={['student']}>{page(<MyCourses />)}</RequireAuth>} />
           <Route path="registration" element={<RequireAuth roles={['student']}>{page(<Registration />)}</RequireAuth>} />
           <Route path="schedule" element={<RequireAuth roles={['student']}>{page(<Schedule />)}</RequireAuth>} />
           <Route path="generator" element={<RequireAuth roles={['student']}>{page(<Generator />)}</RequireAuth>} />

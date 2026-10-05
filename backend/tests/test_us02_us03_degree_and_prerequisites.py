@@ -34,13 +34,13 @@ def test_us2_warns_when_transcript_is_missing(client, db):
 
 
 def test_us3_scenario1_blocks_course_with_missing_prerequisite(client, db):
-    """Student without CSS 231 selects CSS 302: red warning, Add stays disabled."""
+    """Student without CSS 231 selects CSS 350: red warning, Add stays disabled."""
     login(client)
     check = client.post("/api/prerequisites/check",
-                        json={"course_id": course(db, "CSS 302").id, "term_id": term(db).id}).json()
+                        json={"course_id": course(db, "CSS 350").id, "term_id": term(db).id}).json()
     assert check["blocked"] is True
     assert check["message"] == "Missing Prerequisite: CSS 231"
-    response = client.post("/api/cart", json={"section_id": section(db, "CSS 302", "01-N").id})
+    response = client.post("/api/cart", json={"section_id": section(db, "CSS 350", "01-N").id})
     assert response.status_code == 409
     assert detail(response) == "Missing Prerequisite: CSS 231"
 
@@ -50,9 +50,9 @@ def test_us3_scenario2_allows_course_when_prerequisite_passed_with_c_or_higher(c
     complete_course(db, student, "CSS 231", grade="C")
     login(client)
     check = client.post("/api/prerequisites/check",
-                        json={"course_id": course(db, "CSS 302").id, "term_id": term(db).id}).json()
+                        json={"course_id": course(db, "CSS 350").id, "term_id": term(db).id}).json()
     assert check["status"] == "met" and not check["blocked"]
-    assert client.post("/api/cart", json={"section_id": section(db, "CSS 302", "01-N").id}).status_code == 200
+    assert client.post("/api/cart", json={"section_id": section(db, "CSS 350", "01-N").id}).status_code == 200
 
 
 def test_us3_grade_below_c_does_not_satisfy_prerequisite(client, db):
@@ -86,7 +86,7 @@ def test_us3_registration_rejects_unmet_prerequisite_even_if_forced(client, db):
     from app.models import CartItem
 
     student = user(db, "student@sdu.demo")
-    db.add(CartItem(user_id=student.id, section_id=section(db, "CSS 302", "01-N").id))
+    db.add(CartItem(user_id=student.id, section_id=section(db, "CSS 350", "01-N").id))
     db.commit()
     login(client)
     result = client.post("/api/registration/submit", json={"term_id": term(db).id}).json()

@@ -38,6 +38,7 @@ class SduSnapshot:
     term: parsers.TermOption | None = None
     classes: list[parsers.ScheduleClass] = field(default_factory=list)
     grades: list[parsers.GradeRow] = field(default_factory=list)
+    curriculum: parsers.Curriculum | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -102,10 +103,21 @@ class SduClient:
 
     def fetch_snapshot(self, student_id: str) -> SduSnapshot:
         snapshot = SduSnapshot(student_id=student_id)
+        home = ""
         try:
-            snapshot.profile = parsers.parse_profile(self.get_module(""))
+            home = self.get_module("")
+            snapshot.profile = parsers.parse_profile(home)
         except SduError as exc:
             snapshot.warnings.append(f"Profile: {exc}")
+
+        try:
+            snapshot.curriculum = self.fetch_curriculum(home)
+            if snapshot.curriculum is None:
+                snapshot.warnings.append(
+                    "Could not read “My Curriculum” automatically — paste it in Profile → Manual import."
+                )
+        except SduError as exc:
+            snapshot.warnings.append(f"Curriculum: {exc}")
 
         try:
             page = self.get_module("schedule")
@@ -137,6 +149,19 @@ class SduClient:
         except SduError as exc:
             snapshot.warnings.append(f"Grades: {exc}")
         return snapshot
+
+    def fetch_curriculum(self, home: str) -> parsers.Curriculum | None:
+        """Open "My Curriculum" via the portal menu link (falling back to likely module names)."""
+        candidates = []
+        link = parsers.find_menu_link(home, "my curriculum")
+        if link:
+            candidates.append(link if link.startswith(("http", "/")) else f"/{link}")
+        candidates += [f"/index.php?mod={m}" for m in ("mycurriculum", "my_curriculum", "curriculum")]
+        for url in dict.fromkeys(candidates):
+            parsed = parsers.parse_curriculum(self._request("GET", url))
+            if len(parsed.rows) >= 3:
+                return parsed
+        return None
 
     def _fetch_all_grades(self) -> list[parsers.GradeRow]:
         rows: list[parsers.GradeRow] = []

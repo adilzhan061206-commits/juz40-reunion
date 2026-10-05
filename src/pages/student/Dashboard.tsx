@@ -7,6 +7,7 @@ import {
   Clock,
   GraduationCap,
   Hourglass,
+  ListChecks,
   RefreshCw,
   Sparkles,
   TrendingUp,
@@ -79,13 +80,13 @@ export default function Dashboard() {
                 : 'Here is your week at a glance.'}
             </p>
             <div className="row wrap" style={{ marginTop: 20 }}>
-              <Link to="/generator">
-                <Button variant="accent" icon={<Wand2 />}>
-                  Build my schedule
+              <Link to="/my-courses">
+                <Button variant="accent" icon={<ListChecks />}>
+                  Choose my courses
                 </Button>
               </Link>
               <Link to="/registration">
-                <Button icon={<BookOpen />}>Browse courses</Button>
+                <Button icon={<BookOpen />}>Course catalogue</Button>
               </Link>
             </div>
           </div>
@@ -104,6 +105,23 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+
+      <div className="steps-strip">
+        {[
+          { to: '/my-courses', n: 1, icon: <ListChecks />, title: 'Choose courses', text: `Tick what you need from your curriculum${up ? ` for ${up.term.name}` : ''}.` },
+          { to: '/generator', n: 2, icon: <Wand2 />, title: 'Build a schedule', text: 'Pick days off and hours — get only conflict-free timetables.' },
+          { to: '/schedule', n: 3, icon: <CalendarCheck />, title: 'Register & confirm', text: 'Register the draft, confirm it and export to your calendar.' },
+        ].map((s) => (
+          <Link key={s.n} to={s.to} className="step card interactive">
+            <span className="step-n">{s.n}</span>
+            <div>
+              <b className="row" style={{ gap: 7 }}>{s.icon}{s.title}</b>
+              <span className="muted">{s.text}</span>
+            </div>
+            <ArrowRight size={16} className="faint" />
+          </Link>
+        ))}
+      </div>
 
       {data.audit.warnings.map((w) => (
         <Notice key={w} tone="warning">

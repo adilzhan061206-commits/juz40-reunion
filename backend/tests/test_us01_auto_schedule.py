@@ -18,7 +18,7 @@ def _overlap(meetings):
 def test_scenario1_conflict_free_options_without_friday(client, db):
     """Given 4 required courses and "No Friday Classes", Generate returns multiple valid combinations."""
     login(client)
-    payload = {"term_id": term(db).id, "course_ids": _ids(db, "CSS 217", "CSS 231", "ENG 101", "CSS 361"),
+    payload = {"term_id": term(db).id, "course_ids": _ids(db, "CSS 217", "CSS 231", "PHL 101", "CSS 356"),
                "days_off": [4]}
     result = client.post("/api/generator", json=payload).json()
     assert result["message"] is None
@@ -29,7 +29,7 @@ def test_scenario1_conflict_free_options_without_friday(client, db):
         assert all(m["day"] != 4 for m in meetings)
         # every course is fully covered: one section of each kind it offers
         codes = {result["sections"][str(sid)]["course"]["code"] for sid in schedule["section_ids"]}
-        assert codes == {"CSS 217", "CSS 231", "ENG 101", "CSS 361"}
+        assert codes == {"CSS 217", "CSS 231", "PHL 101", "CSS 356"}
 
 
 def test_scenario2_no_conflict_free_options(client, db):
@@ -52,7 +52,7 @@ def test_scenario2_no_conflict_free_options(client, db):
 def test_scenario3_afternoon_filter_updates_results(client, db):
     """Switching to "Afternoon Only (12:00–17:00)" keeps only combinations inside that window."""
     login(client)
-    ids = _ids(db, "CSS 217", "ENG 101")
+    ids = _ids(db, "CSS 217", "PHL 101")
     morning = client.post("/api/generator", json={"term_id": term(db).id, "course_ids": ids, "window": "any"}).json()
     afternoon = client.post("/api/generator", json={"term_id": term(db).id, "course_ids": ids,
                                                     "window": "afternoon"}).json()
@@ -74,7 +74,7 @@ def test_generator_is_fast_for_many_courses(client, db):
 
 def test_apply_generated_schedule_to_draft(client, db):
     login(client)
-    ids = _ids(db, "CSS 217", "ENG 101")
+    ids = _ids(db, "CSS 217", "PHL 101")
     result = client.post("/api/generator", json={"term_id": term(db).id, "course_ids": ids}).json()
     chosen = result["schedules"][0]["section_ids"]
     state = client.post("/api/cart/apply", json={"section_ids": chosen}).json()

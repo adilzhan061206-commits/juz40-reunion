@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, CheckCircle2, Search, Sparkles, Wand2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, ListChecks, Sparkles, Wand2, X } from 'lucide-react'
 import { Badge, Button, Card, CardHead, Empty, Notice, PageHead } from '../../components/ui'
 import WeekGrid from '../../components/WeekGrid'
 import { toGridItems } from '../../lib/grid'
 import { useApp, useToast } from '../../context/app'
-import { errorText, get, post } from '../../lib/api'
+import { errorText, post } from '../../lib/api'
 import { courseColor, DAYS, ects, kindLabel, meetingText } from '../../lib/format'
 import { useDebounced, useLocalStorage } from '../../lib/hooks'
-import type { Recommendation, SectionT } from '../../lib/types'
+import type { SectionT } from '../../lib/types'
+import CurriculumPicker from '../../components/CurriculumPicker'
+import { useCurriculum } from '../../lib/curriculum'
 
 interface PickedCourse {
   id: number
@@ -42,28 +44,21 @@ export default function Generator() {
   const [daysOff, setDaysOff] = useLocalStorage<number[]>('keste-gen-daysoff', [])
   const [windowKey, setWindow] = useLocalStorage<string>('keste-gen-window', 'any')
   const [onlyOpen, setOnlyOpen] = useState(true)
-  const [query, setQuery] = useState('')
-  const [options, setOptions] = useState<PickedCourse[]>([])
   const [latest, setResult] = useState<GeneratorResult | null>(null)
   const [index, setIndex] = useState(0)
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
-  const q = useDebounced(query, 180)
+  const curriculum = useCurriculum(termId)
+  // Courses already completed or being taken never go into a schedule.
+  const done = new Set([
+    ...(curriculum.data?.completed ?? []).map((c) => c.course_id),
+    ...(curriculum.data?.in_progress ?? []).map((c) => c.course_id),
+  ])
+  const removed = picked.filter((c) => done.has(c.id))
+  const chosen = picked.filter((c) => !done.has(c.id))
 
-  useEffect(() => {
-    let alive = true
-    get<{ courses: PickedCourse[] }>(`/api/courses?term_id=${termId ?? ''}&q=${encodeURIComponent(q)}`)
-      .then((d) => alive && setOptions(d.courses))
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [q, termId])
-
-  const request = useMemo(
-    () => JSON.stringify({ term_id: termId, course_ids: picked.map((c) => c.id), days_off: daysOff, window: windowKey, only_open: onlyOpen }),
-    [termId, picked, daysOff, windowKey, onlyOpen],
-  )
+  const chosenIds = chosen.map((c) => c.id).join()
+  const request = JSON.stringify({ term_id: termId, course_ids: chosenIds ? chosenIds.split(',').map(Number) : [], days_off: daysOff, window: windowKey, only_open: onlyOpen })
   const debouncedRequest = useDebounced(request, 260)
 
   useEffect(() => {
@@ -87,28 +82,25 @@ export default function Generator() {
   }, [debouncedRequest, toast])
 
   const toggleCourse = (c: PickedCourse) => {
-    if (picked.some((p) => p.id === c.id)) setPicked(picked.filter((p) => p.id !== c.id))
-    else if (picked.length >= 10) toast('info', 'Up to 10 courses at a time')
-    else setPicked([...picked, c])
+    if (chosen.some((p) => p.id === c.id)) setPicked(chosen.filter((p) => p.id !== c.id))
+    else if (chosen.length >= 10) toast('info', 'Up to 10 courses at a time')
+    else setPicked([...chosen, c])
   }
 
-  const useRecommendations = async () => {
-    try {
-      const data = await get<{ recommendations: Recommendation[] }>(`/api/recommendations?term_id=${termId ?? ''}`)
-      const top = data.recommendations.slice(0, 5).map((r) => ({ id: r.course_id, code: r.code, title: r.title, ects: r.ects }))
-      if (!top.length) return toast('info', 'No recommendations available yet')
-      setPicked(top)
-      toast('success', `Added ${top.length} recommended courses`)
-    } catch (e) {
-      toast('error', errorText(e))
-    }
+  const useRecommendations = () => {
+    const top = (curriculum.data?.next ?? [])
+      .filter((c) => c.suggested)
+      .map((c) => ({ id: c.course_id, code: c.code, title: c.title, ects: c.ects }))
+    if (!top.length) return toast('info', 'No recommended courses for this term')
+    setPicked(top)
+    toast('success', `Selected ${top.length} recommended courses`)
   }
 
-  const result = picked.length ? latest : null
+  const result = chosen.length ? latest : null
   const current = result?.schedules[index]
   const sections = current ? current.section_ids.map((id) => result!.sections[id]).filter(Boolean) : []
   const conflictSections = result && !current ? result.conflicts.flatMap((c) => c.section_ids.map((id) => result.sections[id])).filter(Boolean) : []
-  const totalEcts = picked.reduce((n, c) => n + c.ects, 0)
+  const totalEcts = chosen.reduce((n, c) => n + c.ects, 0)
 
   const apply = async () => {
     if (!current) return
@@ -131,7 +123,7 @@ export default function Generator() {
         lead={<>Step 2 of 3. Set your preferred days and hours — every section combination is checked in real time and only timetables with zero overlaps are shown. Change the course list in <Link to="/my-courses" className="link">My courses</Link>.</>}
         actions={
           <Button icon={<Sparkles />} onClick={useRecommendations}>
-            Use my recommendations
+            Select recommended
           </Button>
         }
       />
@@ -139,11 +131,16 @@ export default function Generator() {
       <div className="split left">
         <div className="stack lg">
           <Card>
-            <CardHead title="Courses" action={<Badge tone="outline">{picked.length} · {ects(totalEcts)}</Badge>} />
+            <CardHead title="Courses in this schedule" action={<Badge tone="outline">{chosen.length} · {ects(totalEcts)}</Badge>} />
             <div className="card-body stack">
-              {picked.length > 0 && (
+              {removed.length > 0 && (
+                <Notice tone="info">
+                  Left out {removed.map((c) => c.code).join(', ')} — already completed or being taken.
+                </Notice>
+              )}
+              {chosen.length > 0 ? (
                 <div className="stack sm">
-                  {picked.map((c) => (
+                  {chosen.map((c) => (
                     <div key={c.id} className="selected-course">
                       <span className="color-dot" style={{ background: courseColor(c.code) }} />
                       <div className="grow">
@@ -156,27 +153,19 @@ export default function Generator() {
                     </div>
                   ))}
                 </div>
+              ) : (
+                <p className="muted" style={{ fontSize: 13 }}>Pick courses from your curriculum below.</p>
               )}
-              <div>
-                <div className="input-icon">
-                  <Search />
-                  <input className="input" placeholder="Add a course…" value={query} onChange={(e) => setQuery(e.target.value)} />
-                </div>
-                <div className="picker-list">
-                  {options.map((c) => {
-                    const on = picked.some((p) => p.id === c.id)
-                    return (
-                      <button key={c.id} className={on ? 'on' : ''} onClick={() => toggleCourse(c)}>
-                        <span className="color-dot" style={{ background: courseColor(c.code) }} />
-                        <b className="mono" style={{ fontSize: 12 }}>{c.code}</b>
-                        <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
-                        {on && <CheckCircle2 size={15} color="var(--accent-strong)" />}
-                      </button>
-                    )
-                  })}
-                  {options.length === 0 && <p className="muted" style={{ padding: 12, fontSize: 13 }}>No offered courses match.</p>}
-                </div>
-              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <CardHead
+              title={`Your curriculum${curriculum.data?.allowed_semesters.length ? ` · semesters ${curriculum.data.allowed_semesters.join(', ')}` : ''}`}
+              icon={<ListChecks />}
+            />
+            <div className="card-body">
+              <CurriculumPicker data={curriculum.data} termId={termId} selected={chosen.map((c) => c.id)} onToggle={toggleCourse} />
             </div>
           </Card>
 
@@ -217,9 +206,9 @@ export default function Generator() {
         </div>
 
         <div className="stack lg">
-          {!picked.length ? (
+          {!chosen.length ? (
             <Card>
-              <Empty icon={<Wand2 />} title="Add courses to start" action={<Button variant="accent" icon={<Sparkles />} onClick={useRecommendations}>Use my recommendations</Button>}>
+              <Empty icon={<Wand2 />} title="Pick courses to start" action={<Button variant="accent" icon={<Sparkles />} onClick={useRecommendations}>Select recommended</Button>}>
                 Choose the courses you need this term. The generator explores every section combination and keeps only those without
                 overlaps.
               </Empty>

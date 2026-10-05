@@ -451,14 +451,27 @@ def delete_plan(plan_id: int, user: User = Depends(student), db: Session = Depen
 @router.get("/courses")
 def search_courses(q: str = "", term_id: int | None = None, user: User = Depends(get_current_user),
                    db: Session = Depends(get_db)):
+    """Course search. For students every result says whether it is already completed, in progress,
+    or part of their curriculum, and curriculum courses come first."""
     query = select(Course)
     if q.strip():
         like = f"%{q.strip()}%"
         query = query.where(Course.code.ilike(like) | Course.title.ilike(like))
     if term_id:
         query = query.where(Course.id.in_(select(Section.course_id).where(Section.term_id == term_id)))
-    courses = db.scalars(query.order_by(Course.code).limit(60)).all()
-    return {"courses": [{"id": c.id, "code": c.code, "title": c.title, "ects": c.ects} for c in courses]}
+    courses = db.scalars(query.order_by(Course.code).limit(200)).all()
+    passed, running, semesters = set(), set(), {}
+    if user.role == "student":
+        passed = reg.passed_course_ids(db, user.id)
+        running = reg.course_history(db, user.id, db.get(Term, term_id) if term_id else None)[1] - passed
+        semesters = curriculum_semesters(db, user)
+    mine = {i.course_id for g in (user.program.groups if user.program else []) for i in g.items}
+    out = [{"id": c.id, "code": c.code, "title": c.title, "ects": c.ects,
+            "completed": c.id in passed, "in_progress": c.id in running,
+            "in_curriculum": c.id in mine, "semester": semesters.get(c.id) if c.id in mine else None}
+           for c in courses]
+    out.sort(key=lambda c: (c["completed"] or c["in_progress"], not c["in_curriculum"], c["code"]))
+    return {"courses": out[:60]}
 
 
 # ---------------------------------------------------------------- notifications

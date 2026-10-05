@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
-import { AlertTriangle, CalendarRange, Plus, Search, Trash2, X } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, CalendarRange, Plus, Trash2, X } from 'lucide-react'
 import { Badge, Button, Card, CardHead, Empty, ErrorState, Field, LoadingCards, Modal, Notice, PageHead } from '../../components/ui'
 import { useApp, useToast } from '../../context/app'
 import { del, errorText, get, patch, post, put } from '../../lib/api'
 import { courseColor, ects, timeAgo } from '../../lib/format'
-import { useAsync, useDebounced } from '../../lib/hooks'
+import { useAsync } from '../../lib/hooks'
+import { useCurriculum } from '../../lib/curriculum'
+import CurriculumPicker from '../../components/CurriculumPicker'
 import type { PlanT } from '../../lib/types'
 
 export default function Planner() {
@@ -149,19 +151,9 @@ function CreatePlan({ terms, onClose, onCreated }: { terms: { id: number; name: 
 
 function PlanEditor({ plan, onChange, onDelete }: { plan: PlanT; onChange: (p: PlanT) => void; onDelete: () => void }) {
   const toast = useToast()
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<{ id: number; code: string; title: string; ects: number }[]>([])
+  const curriculum = useCurriculum(plan.term.id)
   const [name, setName] = useState(plan.name)
   const [notes, setNotes] = useState(plan.notes)
-  const q = useDebounced(query, 200)
-
-  useEffect(() => {
-    if (!q.trim()) return
-    get<{ courses: { id: number; code: string; title: string; ects: number }[] }>(`/api/courses?q=${encodeURIComponent(q)}`)
-      .then((d) => setResults(d.courses.slice(0, 8)))
-      .catch(() => {})
-  }, [q])
-
   const saveItems = async (courseIds: number[]) => {
     try {
       onChange(await put<PlanT>(`/api/plans/${plan.id}/items`, { items: courseIds.map((id) => ({ course_id: id })) }))
@@ -193,33 +185,20 @@ function PlanEditor({ plan, onChange, onDelete }: { plan: PlanT; onChange: (p: P
           Tentative plan for <b>{plan.term.name}</b> · {plan.items.length} courses · {ects(plan.ects)}. Nothing here registers you for
           classes.
         </Notice>
-        <div>
-          <div className="input-icon">
-            <Search />
-            <input className="input" placeholder="Add a course to this plan…" value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
-          {query.trim() && results.length > 0 && (
-            <div className="picker-list">
-              {results.map((c) => (
-                <button
-                  key={c.id}
-                  className={ids.includes(c.id) ? 'on' : ''}
-                  onClick={() => {
-                    if (!ids.includes(c.id)) void saveItems([...ids, c.id])
-                    setQuery('')
-                  }}
-                >
-                  <span className="color-dot" style={{ background: courseColor(c.code) }} />
-                  <b className="mono" style={{ fontSize: 12 }}>{c.code}</b>
-                  <span className="grow">{c.title}</span>
-                  <span className="muted">{c.ects} ECTS</span>
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="stack sm">
+          <span className="field-label">
+            Add from your curriculum{curriculum.data?.allowed_semesters.length ? ` · semesters ${curriculum.data.allowed_semesters.join(', ')}` : ''}
+          </span>
+          <CurriculumPicker
+            data={curriculum.data}
+            termId={plan.term.id}
+            requireSections={false}
+            selected={ids}
+            onToggle={(c) => saveItems(ids.includes(c.id) ? ids.filter((x) => x !== c.id) : [...ids, c.id])}
+          />
         </div>
         {plan.items.length === 0 ? (
-          <p className="muted" style={{ fontSize: 13.5 }}>Search above to add courses.</p>
+          <p className="muted" style={{ fontSize: 13.5 }}>Nothing planned yet — pick courses from your curriculum above.</p>
         ) : (
           <div className="stack sm">
             {plan.items.map((i) => (

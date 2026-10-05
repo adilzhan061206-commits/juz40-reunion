@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: keste-sdu-registration
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: SEED_DEMO
+        value: "true"
+      - key: ADMIN_PASSWORD
+        generateValue: true

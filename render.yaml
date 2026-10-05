@@ -1,13 +1,12 @@
+# Free plan: no persistent disk, so the SQLite database resets to demo data whenever the
+# service restarts or redeploys. For permanent data switch to a paid plan with a disk, or set
+# DATABASE_URL to a PostgreSQL database.
 services:
   - type: web
     name: keste-sdu-registration
     runtime: docker
-    plan: starter
+    plan: free
     healthCheckPath: /api/health
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: APP_ENV
         value: production

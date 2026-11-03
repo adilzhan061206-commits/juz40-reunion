@@ -14,13 +14,15 @@
   --bad: #c0262d;
   --bad-soft: #fde4e4;
   --mark: #fff1b8;
+  --on-ok: #ffffff;
+  --backdrop: rgba(20, 22, 28, 0.45);
   --shadow: 0 1px 2px rgba(20, 22, 28, 0.06), 0 6px 20px rgba(20, 22, 28, 0.06);
   --radius: 18px;
   --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Color Emoji", sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f1115;
     --surface: #181b22;
     --surface-2: #222631;
@@ -36,8 +38,33 @@
     --bad: #ff7a7f;
     --bad-soft: #3a1619;
     --mark: #4a3f10;
+    --on-ok: #0b1a10;
+    --backdrop: rgba(0, 0, 0, 0.6);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --surface: #181b22;
+  --surface-2: #222631;
+  --text: #eef0f5;
+  --muted: #a3a9b8;
+  --border: #2c313d;
+  --accent: #7c9cff;
+  --accent-ink: #0b1020;
+  --accent-soft: #1f2a4d;
+  --reading: #ffb07a;
+  --ok: #5fd68f;
+  --ok-soft: #12321f;
+  --bad: #ff7a7f;
+  --bad-soft: #3a1619;
+  --mark: #4a3f10;
+  --on-ok: #0b1a10;
+  --backdrop: rgba(0, 0, 0, 0.6);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -58,7 +85,9 @@ body {
 #app {
   max-width: 560px;
   margin: 0 auto;
-  padding: max(16px, env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+  padding-block: 16px calc(32px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
   outline: none;
   min-height: 100vh;
 }
@@ -114,16 +143,13 @@ button, .btn {
 .btn[disabled] { opacity: 0.5; cursor: default; }
 .btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btn-soft { background: var(--accent-soft); border-color: transparent; color: var(--text); }
-.btn-ok { background: var(--ok); color: #fff; border-color: var(--ok); }
+.btn-ok { background: var(--ok); color: var(--on-ok); border-color: var(--ok); }
 .btn-bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--muted); font-weight: 500; }
 .btn-block { width: 100%; }
 .btn-small { min-height: 48px; padding: 8px 14px; font-size: 15px; }
 .btn-danger { color: var(--bad); }
 
-@media (prefers-color-scheme: dark) {
-  .btn-ok { color: #0b1a10; }
-}
 
 .row { display: flex; gap: 10px; }
 .row > * { flex: 1 1 0; min-width: 0; }
@@ -251,7 +277,7 @@ mark { background: var(--mark); color: inherit; border-radius: 4px; padding: 0 2
   min-height: 48px; padding: 6px 4px; font-size: 15px; cursor: pointer;
 }
 .toggle input { width: 46px; height: 28px; appearance: none; -webkit-appearance: none; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; position: relative; cursor: pointer; flex: none; transition: background 0.15s; margin: 0; }
-.toggle input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: transform 0.15s; }
+.toggle input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: transform 0.15s; }
 .toggle input:checked { background: var(--accent); border-color: var(--accent); }
 .toggle input:checked::after { transform: translateX(18px); }
 
@@ -344,7 +370,7 @@ mark { background: var(--mark); color: inherit; border-radius: 4px; padding: 0 2
   font-weight: 700; font-size: 16px; color: var(--muted);
 }
 .cal button { background: var(--surface); color: var(--text); }
-.cal .done { background: var(--ok); border-color: var(--ok); color: #fff; }
+.cal .done { background: var(--ok); border-color: var(--ok); color: var(--on-ok); }
 .cal .today { outline: 3px solid var(--accent); outline-offset: 1px; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--muted); margin-top: 10px; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; vertical-align: -1px; margin-right: 4px; }
@@ -357,3 +383,12 @@ h2.section { font-size: 18px; margin: 22px 0 10px; }
   .flash, .q-card, .mic-on { animation: none; }
   .btn, .progress > span { transition: none; }
 }
+
+.dlg-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--backdrop);
+  display: flex; align-items: center; justify-content: center;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.dlg { width: 100%; max-width: 420px; font-size: 17px; }

@@ -137,6 +137,36 @@
     el.textContent = '';
     setTimeout(function () { el.textContent = text; }, 30);
   }
+  // In-page dialog (native confirm/alert are blocked in some embedded viewers).
+  function dialog(message, okLabel, cancelLabel) {
+    return new Promise(function (resolve) {
+      var prev = document.activeElement;
+      var wrap = document.createElement('div');
+      wrap.className = 'dlg-backdrop';
+      wrap.innerHTML = '<div class="dlg card" role="alertdialog" aria-modal="true" aria-labelledby="dlg-msg">' +
+        '<p id="dlg-msg">' + esc(message) + '</p><div class="row mt">' +
+        (cancelLabel ? '<button type="button" class="btn" data-dlg="0">' + esc(cancelLabel) + '</button>' : '') +
+        '<button type="button" class="btn btn-primary" data-dlg="1">' + esc(okLabel || 'Жақсы') + '</button></div></div>';
+      function close(v) {
+        document.removeEventListener('keydown', onKey, true);
+        wrap.remove();
+        if (prev && prev.focus) { try { prev.focus(); } catch (e) { /* ignore */ } }
+        resolve(v);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); }
+        else if (e.key !== 'Tab' && e.key !== 'Enter' && e.key !== ' ') e.stopPropagation();
+      }
+      wrap.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-dlg]');
+        if (b) close(b.getAttribute('data-dlg') === '1');
+        else if (e.target === wrap) close(false);
+      });
+      document.addEventListener('keydown', onKey, true);
+      document.body.appendChild(wrap);
+      wrap.querySelector('[data-dlg="1"]').focus();
+    });
+  }
   function stripDots(s) { return String(s).replace(/\.\.\.|…/g, '').replace(/\s+/g, ' ').trim(); }
 
   // Normalize English text for comparisons (typing + speech).
@@ -830,8 +860,9 @@
     on('speak', startSpeak);
     on('next-day', function () { S.current = Math.min(TOTAL_DAYS, n + 1); S.unlocked = Math.max(S.unlocked, S.current); save(); renderHome(); });
     on('unlock', function () {
-      if (!ds.done && !window.confirm('Бүгінгі сабақ пен тест әлі аяқталмаған. Бәрібір ' + (n + 1) + '-күнді ашасың ба?')) return;
-      S.current = n + 1; S.unlocked = Math.max(S.unlocked, S.current); save(); renderHome();
+      function unlock() { S.current = n + 1; S.unlocked = Math.max(S.unlocked, S.current); save(); renderHome(); }
+      if (ds.done) { unlock(); return; }
+      dialog('Бүгінгі сабақ пен тест әлі аяқталмаған. Бәрібір ' + (n + 1) + '-күнді ашасың ба?', 'Иә, ашу', 'Жоқ').then(function (yes) { if (yes) unlock(); });
     });
   }
 
@@ -862,7 +893,7 @@
       fresh.forEach(function (id) { queue.push({ id: id, kind: 'new' }); });
     }
     if (!queue.length) {
-      window.alert('Қазір қайталайтын сөз жоқ. Жарайсың! 👏');
+      dialog('Қазір қайталайтын сөз жоқ. Жарайсың! 👏');
       return;
     }
     session = { screen: 'lesson', mode: mode, day: n, queue: queue, pos: 0, flipped: false, requeued: {}, known: 0, unknown: 0, unknownIds: [] };
@@ -1092,7 +1123,7 @@
       var oldPick = shuffle(old.slice(0, OLD_IN_TEST * 2)).slice(0, OLD_IN_TEST);
       list = todayIds.concat(oldPick);
     }
-    if (!list.length) { window.alert('Тест үшін сөз жоқ.'); return; }
+    if (!list.length) { dialog('Тест үшін сөз жоқ.'); return; }
     session = {
       screen: 'test', mode: mode, day: n,
       questions: buildQuestions(list), pos: 0, answered: false,
@@ -1535,11 +1566,13 @@
     var hc = $('[data-act="hard-cards"]'); if (hc) hc.addEventListener('click', function () { startLesson('list', hard); });
     var ht = $('[data-act="hard-test"]'); if (ht) ht.addEventListener('click', function () { startTest('list', hard); });
     $('[data-act="reset"]').addEventListener('click', function () {
-      if (!window.confirm('Барлық прогресс өшіріледі: сөздер, тест нәтижелері, күндер. Сенімдісің бе?')) return;
-      lsDel(STATE_KEY);
-      S = freshState();
-      save();
-      go('home');
+      dialog('Барлық прогресс өшіріледі: сөздер, тест нәтижелері, күндер. Сенімдісің бе?', 'Иә, тазалау', 'Болдырмау').then(function (yes) {
+        if (!yes) return;
+        lsDel(STATE_KEY);
+        S = freshState();
+        save();
+        go('home');
+      });
     });
   }
 
@@ -1556,7 +1589,8 @@
     }).catch(function () {
       app.innerHTML = '<div class="card center"><h1 style="font-size:22px">Сөздер жүктелмеді</h1>' +
         '<p class="mt">Алғаш ашқанда интернет керек. Қосылып, бетті жаңарт.</p>' +
-        '<button type="button" class="btn btn-primary mt" onclick="location.reload()">Қайта жүктеу</button></div>';
+        '<button type="button" class="btn btn-primary mt" data-act="reload">Қайта жүктеу</button></div>';
+      var rl = $('[data-act="reload"]'); if (rl) rl.addEventListener('click', function () { location.reload(); });
     });
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       window.addEventListener('load', function () {

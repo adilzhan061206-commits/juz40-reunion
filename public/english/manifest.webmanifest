@@ -1,0 +1,12 @@
+{
+  "name": "625 сөз · 30 күн",
+  "short_name": "625 сөз",
+  "description": "30 күнде 625 ағылшын сөзі — Work & Travel USA",
+  "lang": "kk",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#2f5bea",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

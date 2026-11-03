@@ -1,3 +1,7 @@
 {
-    "rewrites": [{ "source": "/(.*)", "destination": "/" }]
-  }
+  "redirects": [{ "source": "/english", "destination": "/english/", "permanent": false }],
+  "rewrites": [
+    { "source": "/english/", "destination": "/english/index.html" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}

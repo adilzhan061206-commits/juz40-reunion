@@ -418,6 +418,19 @@
     return true;
   }
 
+  // One-time fix for v1 users: if the current day was opened but never started,
+  // go back to the earliest day that is not finished yet.
+  function returnToUnfinishedDay() {
+    if (S.fixedDayV2) return;
+    S.fixedDayV2 = true;
+    var cur = S.days[S.current];
+    var untouched = !cur || (!cur.done && !cur.test && !(cur.seen && cur.seen.length));
+    if (!untouched) return;
+    for (var d = 1; d < S.current; d++) {
+      if (!(S.days[d] && S.days[d].done)) { S.current = d; return; }
+    }
+  }
+
   // When the calendar day changes after a finished day, move on automatically.
   function autoAdvance() {
     var ds = S.days[S.current];
@@ -1762,6 +1775,7 @@
     loadWords().then(function (json) {
       indexData(json);
       if (!DAY[S.current]) S.current = 1;
+      returnToUnfinishedDay();
       save();
       route();
     }).catch(function () {

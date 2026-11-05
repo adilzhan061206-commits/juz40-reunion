@@ -1,8 +1,23 @@
 /* Offline cache for the 625-words app. Scope: this folder. */
-var VERSION = 'w30-v1';
+var VERSION = 'w30-v2';
 var SHELL = VERSION + '-shell';
 var IMAGES = 'w30-images';
-var FILES = ['./', 'index.html', 'style.css', 'app.js', 'words.json', 'manifest.webmanifest', 'icon.svg'];
+var FILES = ['./', 'index.html', 'style.css', 'app.js', 'words.json', 'manifest.webmanifest', 'icon.svg',
+  'fonts/tektur-latin-600-normal.woff2',
+  'fonts/tektur-cyrillic-600-normal.woff2',
+  'fonts/tektur-cyrillic-ext-600-normal.woff2',
+  'fonts/tektur-latin-800-normal.woff2',
+  'fonts/tektur-cyrillic-800-normal.woff2',
+  'fonts/tektur-cyrillic-ext-800-normal.woff2',
+  'fonts/onest-latin-400-normal.woff2',
+  'fonts/onest-cyrillic-400-normal.woff2',
+  'fonts/onest-cyrillic-ext-400-normal.woff2',
+  'fonts/onest-latin-600-normal.woff2',
+  'fonts/onest-cyrillic-600-normal.woff2',
+  'fonts/onest-cyrillic-ext-600-normal.woff2',
+  'fonts/onest-latin-800-normal.woff2',
+  'fonts/onest-cyrillic-800-normal.woff2',
+  'fonts/onest-cyrillic-ext-800-normal.woff2'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(SHELL).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));

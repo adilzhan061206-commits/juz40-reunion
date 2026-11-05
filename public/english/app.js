@@ -12,6 +12,7 @@
   var INTERVAL = { 1: 0, 2: 1, 3: 3, 4: 7, 5: 14 };
   var LEARNED_BOX = 6;
   var REVIEW_CAP = 40;          // max cards in a review block
+  var MORNING_REVIEW = 10;      // older words warmed up before today's new words
   var OLD_IN_TEST = 10;         // old words mixed into the evening test
   var REVIEW_DAY_TEST = 40;     // questions on review days 26–29
   var FINAL_TEST = 100;         // questions on day 30
@@ -312,6 +313,7 @@
       activity: [],
       stats: { answered: 0, correct: 0, seconds: 0 },
       settings: { hideReading: false, photos: true },
+      miles: 0,
       created: today()
     };
   }
@@ -578,6 +580,7 @@
           '<div class="mt-s small muted">Танылған мәтін:</div><div><b>' + esc(r.said) + '</b></div>' +
           (r.html && !r.ok ? '<div class="mt-s diff small">' + r.html + '</div>' : '');
         announce(r.ok ? 'Дұрыс' : 'Қате. Дұрыс айтылуы ойнатылады');
+        if (r.ok) addMiles(5);
         if (!r.ok) setTimeout(function () { speak(target, 0.8); }, 400);
       }).catch(function (err) {
         out.className = 'speech-out bad';
@@ -756,9 +759,23 @@
   }
   function route() {
     stopRecognition();
+    var oldToast = document.querySelector('.toast');
+    if (oldToast) oldToast.remove();
     if (synth) { try { synth.cancel(); } catch (e) { /* ignore */ } }
     keyHandler = null;
     var screen = (location.hash || '#home').slice(1);
+    var dm = /^day-(\d{1,2})$/.exec(screen);
+    if (dm) {
+      var want = +dm[1];
+      if (want >= 1 && want <= TOTAL_DAYS && DAY[want]) {
+        S.current = want;
+        S.unlocked = Math.max(S.unlocked, want);
+        save();
+      }
+      session = null;
+      try { history.replaceState(null, '', '#home'); } catch (e) { /* ignore */ }
+      screen = 'home';
+    }
     var needsSession = { lesson: 1, test: 1, result: 1, interview: 1, speak: 1 };
     if (needsSession[screen] && (!session || session.screen !== screen)) screen = 'home';
     if (screen === 'home' || screen === 'progress') session = null;
@@ -788,8 +805,66 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Shared visual pieces: flight path, miles
+  // ---------------------------------------------------------------------------
+  var PLANE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M21.6 12c0-.8-.7-1.4-1.5-1.4h-5.3L9.9 3.1H7.8l2.5 7.5H5.6L3.9 8.4H2.4l1 3.6-1 3.6h1.5l1.7-2.2h4.7l-2.5 7.5h2.1l4.9-7.5h5.3c.8 0 1.5-.6 1.5-1.4z"/></svg>';
+  function flightBar(pct) {
+    var p = Math.max(0, Math.min(100, pct));
+    return '<div class="flight" aria-hidden="true"><span class="fill" style="width:' + p + '%"></span>' +
+      '<span class="plane" style="left:' + Math.max(3, Math.min(97, p)) + '%">' + PLANE_SVG + '</span></div>';
+  }
+  function tripHeader(text, done, total) {
+    var pct = total ? Math.round((done / total) * 100) : 0;
+    return '<div class="counter" role="status">' + esc(text) + '</div>' +
+      '<div class="trip">' + flightBar(pct) + '</div>';
+  }
+
+  var CLASSES = [
+    { min: 0, name: 'Эконом' },
+    { min: 3000, name: 'Эконом плюс' },
+    { min: 9000, name: 'Бизнес' },
+    { min: 18000, name: 'Бірінші класс' }
+  ];
+  function milesClass(m) {
+    var cur = CLASSES[0], next = null;
+    for (var i = 0; i < CLASSES.length; i++) {
+      if (m >= CLASSES[i].min) { cur = CLASSES[i]; next = CLASSES[i + 1] || null; }
+    }
+    return { cur: cur, next: next };
+  }
+  function fmtNum(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+  var toastTimer = null;
+  function addMiles(n, quiet) {
+    if (!n) return;
+    S.miles = (S.miles || 0) + n;
+    if (session) session.miles = (session.miles || 0) + n;
+    save();
+    if (quiet) return;
+    var old = document.querySelector('.toast');
+    if (old) old.remove();
+    var t = document.createElement('div');
+    t.className = 'toast';
+    t.setAttribute('aria-hidden', 'true');
+    t.innerHTML = '✈ <b>+' + n + '</b> миль';
+    document.body.appendChild(t);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.remove(); }, 1500);
+  }
+  function daysDoneCount() {
+    var c = 0;
+    for (var d = 1; d <= TOTAL_DAYS; d++) if (S.days[d] && S.days[d].done) c++;
+    return c;
+  }
+
+  // ---------------------------------------------------------------------------
   // HOME
   // ---------------------------------------------------------------------------
+  function morningReviewIds(n) {
+    var own = {};
+    dayWordIds(n).forEach(function (id) { own[id] = 1; });
+    return weakFirst(dueIds().filter(function (id) { return !own[id]; }));
+  }
+
   function renderHome() {
     autoAdvance();
     var n = S.current;
@@ -797,54 +872,104 @@
     var ds = dayState(n);
     var review = isReviewDay(n);
     var due = dueIds().length;
-    var learned = Object.keys(S.words).filter(function (id) { return S.words[id].box >= LEARNED_BOX; }).length;
-    var pct, label;
+    var learned = Object.keys(S.words).filter(function (id) { return BY_ID[id] && S.words[id].box >= LEARNED_BOX; }).length;
+    var seen = Math.min(ds.seen.length, 25);
+    var morningRev = Math.min(morningReviewIds(n).length, MORNING_REVIEW);
+
+    var pct;
+    if (review) pct = (ds.lesson ? 50 : 0) + (ds.test ? 50 : 0);
+    else pct = Math.round(((seen + (ds.test ? 25 : 0)) / 50) * 100);
+
+    // where the plane is on the 30-day route
+    var routePct = ((n - 1) + pct / 100) / TOTAL_DAYS * 100;
+
+    // today's words (stub of the pass)
+    var stub;
     if (review) {
-      pct = (ds.lesson ? 50 : 0) + (ds.test ? 50 : 0);
-      label = 'Қайталау: ' + (ds.lesson ? '✓' : '—') + ' · Тест: ' + (ds.test ? '✓' : '—');
+      var rd = d.review_days;
+      stub = '<span class="label">Бүгін қайталанатын сөздер</span>' +
+        '<p class="mt-s">' + (rd.length > 1 ? rd[0] + '–' + rd[rd.length - 1] : rd[0]) + '-күндердің ' + dayWordIds(n).length + ' сөзі' +
+        (n === TOTAL_DAYS ? ' · 100 сұрақтық қорытынды тест' : '') + '</p>';
     } else {
-      var seen = ds.seen.length;
-      pct = Math.round(((Math.min(seen, 25) + (ds.test ? 25 : 0)) / 50) * 100);
-      label = 'Сабақ: ' + Math.min(seen, 25) + '/25 · Тест: ' + (ds.test ? '✓ ' + ds.score + '%' : '—');
+      var words = d.words.map(function (w) { return w.english; });
+      stub = '<span class="label">Бүгінгі 25 жаңа сөз</span><div class="chips" lang="en">' +
+        words.slice(0, 9).map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('') +
+        '<span class="more">+' + (words.length - 9) + '</span></div>';
     }
 
-    var doneBanner = '';
+    var cls = milesClass(S.miles || 0).cur.name;
+    var pass =
+      '<section class="pass" aria-label="Отырғызу талоны">' +
+        '<div class="pass-main">' +
+          '<div class="pass-top"><span class="label">Boarding pass · J-1 2027</span><span class="label">' + esc(cls) + '</span></div>' +
+          '<div class="pass-day"><div><h1>' + n + '-күн</h1></div>' +
+            '<span class="streak" aria-label="Күн қатарынан: ' + streak() + '">🔥 ' + streak() + '</span></div>' +
+          '<p class="topic">' + esc(d.topic_kz) + '</p>' +
+          '<p class="topic-en" lang="en">' + esc(d.topic_en) + '</p>' +
+          '<div class="route" aria-label="Маршрут: ' + n + '-күн, 30 күннің ішінде">' +
+            '<div><div class="iata">ALA</div><div class="city">Алматы</div></div>' +
+            flightBar(routePct) +
+            '<div class="right"><div class="iata">BOS</div><div class="city">Кейп-Код</div></div>' +
+          '</div>' +
+          '<div class="fields">' +
+            '<div><span class="label">Күн</span><b>' + (n < 10 ? '0' : '') + n + '<small>/30</small></b></div>' +
+            '<div><span class="label">Миль</span><b>' + fmtNum(S.miles || 0) + '</b></div>' +
+            '<div><span class="label">Үйренілді</span><b>' + learned + '<small>/' + WORDS.length + '</small></b></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pass-stub">' + stub + '</div>' +
+      '</section>';
+
+    var landed = '';
     if (ds.done) {
-      doneBanner = '<div class="card done-banner mt" role="status"><h2>🎉 ' + n + '-күн аяқталды!</h2>' +
+      landed = '<div class="landed" role="status"><h2>🛬 ' + n + '-күн аяқталды!</h2>' +
         (n < TOTAL_DAYS
-          ? '<p>Жарайсың! Келесі күн ашылды. Ертең жалғастыр немесе қазір баста.</p>' +
-            '<button type="button" class="btn btn-ok btn-block mt" data-act="next-day">' + (n + 1) + '-күнге өту →</button>'
+          ? '<p>Жарайсың! ' + (n + 1) + '-күн ашылды. Ертең таңертең жалғастыр немесе қазір баста.</p>' +
+            '<button type="button" class="btn btn-ok btn-block mt" data-act="next-day">' + (n + 1) + '-күнге ұшу →</button>'
           : '<p>Құттықтаймыз! 30 күндік бағдарламаны толық аяқтадың. Енді сұхбатқа дайынсың! 🇺🇸</p>') +
         '</div>';
     }
 
-    var lessonSub = review ? 'Әлсіз сөздерді қайталау' : (ds.lesson ? 'Өтілді ✓' : '25 жаңа сөз');
-    var testSub = n === TOTAL_DAYS ? '100 сұрақ' : (ds.test ? 'Нәтиже: ' + ds.score + '%' : (review ? REVIEW_DAY_TEST + ' сұрақ' : 'Бүгінгі сөздер'));
+    var lessonSub, lessonState, testSub, testState;
+    if (review) {
+      lessonSub = 'Әлсіз сөздерді қайталау · ' + REVIEW_CAP + ' карточка';
+    } else if (ds.lesson) {
+      lessonSub = '25 жаңа сөз өтілді';
+    } else if (seen > 0) {
+      lessonSub = 'Жаңа сөздер: ' + seen + '/25 — жалғастыр';
+    } else {
+      lessonSub = (morningRev ? morningRev + ' қайталау + ' : '') + '25 жаңа сөз';
+    }
+    lessonState = ds.lesson ? 'ДАЙЫН ✓' : (seen > 0 && !review ? seen + '/25' : 'БАСТАУ →');
+    testSub = n === TOTAL_DAYS ? '100 сұрақ · барлық 625 сөз' : (review ? REVIEW_DAY_TEST + ' сұрақ · әлсіз сөздер' : '25 бүгінгі + ескі сөздер');
+    testState = ds.test ? ds.score + '% ✓' : (ds.lesson ? 'БАСТАУ →' : 'КЕШКЕ');
+    var lessonCls = ds.lesson ? 'is-done' : 'is-next';
+    var testCls = ds.test ? 'is-done' : (ds.lesson ? 'is-next' : '');
 
     setView(
-      '<header class="home-head">' +
-        '<div><h1>' + n + '-күн</h1>' +
-          '<p class="topic">' + esc(d.topic_kz) + '</p>' +
-          '<p class="topic-en">' + esc(d.topic_en) + '</p></div>' +
-        '<span class="chip" aria-label="Күн қатарынан: ' + streak() + '">🔥 ' + streak() + '</span>' +
-      '</header>' +
-      '<div class="mt" role="group" aria-label="Күннің прогресі">' +
-        '<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '" aria-label="Күннің прогресі"><span style="width:' + pct + '%"></span></div>' +
-        '<div class="progress-label"><span>' + label + '</span><span>Үйренілді: ' + learned + '/' + WORDS.length + '</span></div>' +
-      '</div>' +
-      doneBanner +
-      '<div class="card due-card mt">' +
-        '<span class="big" aria-hidden="true">🔁</span>' +
-        '<span class="txt">Бүгін қайталауға: ' + due + ' сөз</span>' +
+      pass +
+      landed +
+      '<div class="section-head"><h2>Бүгінгі маршрут</h2><span class="pct">' + pct + '%</span></div>' +
+      '<div class="daybar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '" aria-label="Күннің прогресі"><span style="width:' + pct + '%"></span></div>' +
+      '<ol class="steps">' +
+        '<li><button type="button" class="step ' + lessonCls + '" data-act="lesson">' +
+          '<span class="step-n" aria-hidden="true">' + (ds.lesson ? '✓' : '1') + '</span>' +
+          '<span class="step-body"><span class="step-t">☀️ Таңғы сабақ</span><span class="step-s">' + esc(lessonSub) + '</span></span>' +
+          '<span class="step-state">' + lessonState + '</span></button></li>' +
+        '<li><button type="button" class="step ' + testCls + '" data-act="test">' +
+          '<span class="step-n" aria-hidden="true">' + (ds.test ? '✓' : '2') + '</span>' +
+          '<span class="step-body"><span class="step-t">🌙 Кешкі тест</span><span class="step-s">' + esc(testSub) + '</span></span>' +
+          '<span class="step-state">' + testState + '</span></button></li>' +
+      '</ol>' +
+      '<div class="due-row">' +
+        '<span class="txt">🔁 Бүгін қайталауға: ' + due + ' сөз</span>' +
         (due ? '<button type="button" class="btn btn-soft btn-small" data-act="review">Қайталау</button>' : '<span class="muted" aria-label="Бәрі қайталанды">✓</span>') +
       '</div>' +
-      '<nav class="menu mt" aria-label="Негізгі мәзір">' +
-        '<button type="button" class="btn btn-primary" data-act="lesson"><span class="ico" aria-hidden="true">☀️</span>Таңғы сабақ<span class="sub">' + lessonSub + '</span></button>' +
-        '<button type="button" class="btn" data-act="test"><span class="ico" aria-hidden="true">🌙</span>Кешкі тест<span class="sub">' + testSub + '</span></button>' +
-        '<button type="button" class="btn" data-act="interview"><span class="ico" aria-hidden="true">🎙️</span>Сұхбат жаттығуы<span class="sub">Виза сұхбаты</span></button>' +
-        '<button type="button" class="btn" data-act="progress"><span class="ico" aria-hidden="true">📊</span>Прогресс<span class="sub">Статистика</span></button>' +
+      '<nav class="tiles" aria-label="Қосымша жаттығулар">' +
+        '<button type="button" class="tile" data-act="interview"><span class="ico" aria-hidden="true">🎙️</span>Сұхбат жаттығуы</button>' +
+        '<button type="button" class="tile" data-act="speak"><span class="ico" aria-hidden="true">🗣️</span>Айтылу жаттығуы</button>' +
+        '<button type="button" class="tile" data-act="progress"><span class="ico" aria-hidden="true">📊</span>Прогресс</button>' +
       '</nav>' +
-      '<button type="button" class="btn btn-block mt" data-act="speak">🗣️ Айтылу жаттығуы' + (SR ? '' : ' <span class="small muted">(тек тыңдау)</span>') + '</button>' +
       '<p class="reminder mt">Таңертең — жаңа 25 сөз, кешке — тест. Күніне 30–40 минут.</p>' +
       (n < TOTAL_DAYS && !ds.done
         ? '<div class="center mt-s"><button type="button" class="btn btn-ghost btn-small" data-act="unlock">Келесі күнді ашу</button></div>'
@@ -873,45 +998,81 @@
     var n = S.current;
     var ds = dayState(n);
     var queue = [];
-    var due = weakFirst(dueIds()).slice(0, REVIEW_CAP);
-    var dueSet = {};
     if (mode === 'due') {
-      due.forEach(function (id) { queue.push({ id: id, kind: 'review' }); });
+      weakFirst(dueIds()).slice(0, REVIEW_CAP).forEach(function (id) { queue.push({ id: id, kind: 'review' }); });
     } else if (mode === 'list') {
       ids.forEach(function (id) { queue.push({ id: id, kind: 'review' }); });
     } else if (isReviewDay(n)) {
+      var due = weakFirst(dueIds()).slice(0, REVIEW_CAP);
+      var dueSet = {};
       due.forEach(function (id) { dueSet[id] = 1; queue.push({ id: id, kind: 'review' }); });
       var extra = weakFirst(dayWordIds(n).filter(function (id) { return !dueSet[id]; }));
       extra.slice(0, Math.max(10, REVIEW_CAP - queue.length)).forEach(function (id) { queue.push({ id: id, kind: 'review' }); });
     } else {
+      // A short warm-up of the weakest older words, then today's 25 new words.
+      // The rest of the due words stay in "Бүгін қайталауға" on the home screen.
       var dayIds = dayWordIds(n);
-      var dayIdSet = {};
-      dayIds.forEach(function (id) { dayIdSet[id] = 1; });
-      due.forEach(function (id) { if (!dayIdSet[id]) queue.push({ id: id, kind: 'review' }); });
       var unseen = dayIds.filter(function (id) { return ds.seen.indexOf(id) === -1; });
       var fresh = unseen.length ? unseen : dayIds; // all seen → go through again
+      if (unseen.length === dayIds.length) {
+        morningReviewIds(n).slice(0, MORNING_REVIEW).forEach(function (id) { queue.push({ id: id, kind: 'review' }); });
+      }
+      if (queue.length) queue.push({ kind: 'break', count: fresh.length });
       fresh.forEach(function (id) { queue.push({ id: id, kind: 'new' }); });
     }
     if (!queue.length) {
       dialog('Қазір қайталайтын сөз жоқ. Жарайсың! 👏');
       return;
     }
-    session = { screen: 'lesson', mode: mode, day: n, queue: queue, pos: 0, flipped: false, requeued: {}, known: 0, unknown: 0, unknownIds: [] };
+    session = { screen: 'lesson', mode: mode, day: n, queue: queue, pos: 0, flipped: false, requeued: {}, known: 0, unknown: 0, unknownIds: [], miles: 0 };
     go('lesson');
+  }
+
+  function renderBreak(item) {
+    var s = session;
+    setView(
+      topbar('Таңғы сабақ') +
+      '<section class="card break-card" aria-live="polite">' +
+        '<div class="big" aria-hidden="true">🛫</div>' +
+        '<h2>Қайталау аяқталды!</h2>' +
+        '<p>Ескі сөздер: білемін — ' + s.known + ', білмеймін — ' + s.unknown + '.</p>' +
+        '<p>Енді бүгінгі <b>' + item.count + ' жаңа сөз</b>.</p>' +
+      '</section>' +
+      '<button type="button" class="btn btn-primary btn-block mt" data-act="go-new">Жаңа сөздерді бастау →</button>',
+      '[data-act="go-new"]'
+    );
+    bindCommon();
+    $('[data-act="go-new"]').addEventListener('click', function () { s.pos++; renderLesson(); });
+    keyHandler = function (e) { if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') { s.pos++; renderLesson(); } };
   }
 
   function renderLesson() {
     var s = session;
     if (s.pos >= s.queue.length) return finishLesson();
     var item = s.queue[s.pos];
+    if (item.kind === 'break') return renderBreak(item);
     var w = BY_ID[item.id];
+    var cards = s.queue.filter(function (q) { return q.kind !== 'break'; });
+    var before = s.queue.slice(0, s.pos).filter(function (q) { return q.kind !== 'break'; }).length;
     var newTotal = s.queue.filter(function (q) { return q.kind === 'new'; }).length;
-    var revTotal = s.queue.length - newTotal;
+    var revTotal = cards.length - newTotal;
     var idxInKind = s.queue.slice(0, s.pos + 1).filter(function (q) { return q.kind === item.kind; }).length;
-    var phase = item.kind === 'new' ? 'Жаңа сөздер: ' + idxInKind + '/' + newTotal : 'Қайталау: ' + idxInKind + '/' + revTotal;
+    var phase = item.kind === 'new' ? 'Жаңа сөздер · ' + idxInKind + '/' + newTotal : 'Қайталау · ' + idxInKind + '/' + revTotal;
     var hide = S.settings.hideReading;
+    var st = S.words[w.id];
+    var box = st ? Math.min(st.box, 5) : 0;
+    var dots = '';
+    for (var b = 1; b <= 5; b++) dots += '<i class="' + (b <= box ? 'on' : '') + '"></i>';
+    var breakIdx = -1;
+    s.queue.forEach(function (q, i) { if (q.kind === 'break') breakIdx = i; });
+    var canSkip = s.mode === 'lesson' && item.kind === 'review' && breakIdx > s.pos;
+
+    var tag = item.kind === 'new'
+      ? '<div class="tag is-new"><span class="label">Жаңа сөз</span><span class="label">' + w._day + '-күн</span></div>'
+      : '<div class="tag"><span class="label">Қайталау · ' + w._day + '-күннен</span><span class="boxdots" role="img" aria-label="' + (box || 1) + '-қорап">' + dots + '</span></div>';
 
     var front =
+      tag +
       picHtml(w) +
       '<div class="word" lang="en">' + esc(w.english) + '</div>' +
       '<div class="pos" lang="en">' + esc(w.part_of_speech) + '</div>' +
@@ -923,7 +1084,7 @@
       '<p class="example" lang="en">' + highlightExample(w) + '</p>';
 
     var back = s.flipped
-      ? '<hr style="border:0;border-top:1px solid var(--border);margin:18px 0 8px">' +
+      ? '<hr class="flip-line">' +
         '<div class="meaning">' + esc(w.kazakh) + '</div>' +
         '<p class="example-kz">' + esc(w.example_kz) + '</p>'
       : '';
@@ -936,8 +1097,7 @@
 
     setView(
       topbar(s.mode === 'lesson' ? 'Таңғы сабақ' : 'Қайталау') +
-      '<div class="center"><span class="phase">' + esc(phase) + '</span></div>' +
-      '<div class="progress mt-s" aria-hidden="true"><span style="width:' + Math.round((s.pos / s.queue.length) * 100) + '%"></span></div>' +
+      tripHeader(phase, before, cards.length) +
       '<article class="card flash mt' + (s.flipped ? ' flipped' : '') + '" aria-label="Сөз карточкасы">' + front + back + '</article>' +
       actions +
       '<div class="grid2 mt">' +
@@ -948,22 +1108,24 @@
       '</div>' +
       (SR ? '<div id="mic-card-out" class="speech-out" hidden aria-live="polite"></div>' : '') +
       '<label class="toggle mt-s"><span>Оқылуын жасыру</span><input type="checkbox" role="switch" data-act="hide"' + (hide ? ' checked' : '') + '></label>' +
+      (canSkip ? '<button type="button" class="btn btn-ghost btn-block" data-act="skip-review">Қайталауды өткізіп, жаңа сөздерге өту →</button>' : '') +
       '<p class="center small muted">' + hint + '</p>',
       s.flipped ? '[data-act="known"]' : 'h1'
     );
     bindCommon();
     wirePic(w);
     var next = s.queue[s.pos + 1];
-    if (next) prefetchPhoto(BY_ID[next.id]);
+    if (next && next.id) prefetchPhoto(BY_ID[next.id]);
     bindMic('mic-card', function () { return w.english; });
 
-    function on(act, fn) { var b = $('[data-act="' + act + '"]'); if (b) b.addEventListener(b.type === 'checkbox' ? 'change' : 'click', fn); }
+    function on(act, fn) { var el = $('[data-act="' + act + '"]'); if (el) el.addEventListener(el.type === 'checkbox' ? 'change' : 'click', fn); }
     on('say', function () { speak(w.english, 0.9); });
     on('slow', function () { speak(w.english, 0.6); });
     on('sentence', function () { speak(w.example, 0.9); });
     on('flip', flip);
     on('known', function () { answer(true); });
     on('unknown', function () { answer(false); });
+    on('skip-review', function () { s.pos = breakIdx + 1; s.flipped = false; renderLesson(); });
     on('hide', function (e) { S.settings.hideReading = e.target.checked; save(); renderLesson(); });
     on('show-reading', function (e) {
       var span = document.createElement('span');
@@ -979,6 +1141,7 @@
         var ds = dayState(s.day);
         if (ds.seen.indexOf(w.id) === -1) { ds.seen.push(w.id); save(); }
       }
+      addMiles(ok ? (item.kind === 'new' ? 10 : 5) : 2, true);
       if (ok) s.known++; else {
         s.unknown++;
         if (s.unknownIds.indexOf(w.id) === -1) s.unknownIds.push(w.id);
@@ -1008,15 +1171,19 @@
       else if (dayWordIds(n).every(function (id) { return ds.seen.indexOf(id) !== -1; })) ds.lesson = true;
       save();
       finishedDay = checkDayDone(n);
+      if (finishedDay) addMiles(100, true);
     }
-    var title = s.mode === 'lesson' ? 'Таңғы сабақ аяқталды! 🎉' : 'Қайталау аяқталды! 👏';
+    var title = s.mode === 'lesson' ? 'Таңғы сабақ аяқталды!' : 'Қайталау аяқталды!';
     setView(
       topbar(s.mode === 'lesson' ? 'Таңғы сабақ' : 'Қайталау') +
-      '<div class="card center"><h2 style="font-size:24px">' + title + '</h2>' +
-        '<p class="mt">Білемін: <b>' + s.known + '</b> · Білмеймін: <b>' + s.unknown + '</b></p>' +
-        (s.mode === 'lesson' && !ds.test ? '<p class="mt muted">Кешке тест тапсыруды ұмытпа!</p>' : '') +
-        (finishedDay ? '<p class="mt"><b>' + n + '-күн толық аяқталды!</b></p>' : '') +
-      '</div>' +
+      '<section class="card break-card">' +
+        '<div class="big" aria-hidden="true">' + (finishedDay ? '🛬' : '☀️') + '</div>' +
+        '<h2>' + title + '</h2>' +
+        '<p>Білемін: <b>' + s.known + '</b> · Білмеймін: <b>' + s.unknown + '</b></p>' +
+        (s.miles ? '<span class="miles-earned">✈ +' + fmtNum(s.miles) + ' миль</span>' : '') +
+        (s.mode === 'lesson' && !ds.test ? '<p>Кешке тест тапсыруды ұмытпа!</p>' : '') +
+        (finishedDay ? '<p><b>' + n + '-күн толық аяқталды!</b></p>' : '') +
+      '</section>' +
       '<div class="stack mt">' +
         (s.mode === 'lesson' && !ds.test ? '<button type="button" class="btn btn-primary" data-act="test">🌙 Тестті қазір бастау</button>' : '') +
         (s.unknownIds.length ? '<button type="button" class="btn btn-soft" data-act="again">🔁 Білмеген сөздерді қайталау (' + s.unknownIds.length + ')</button>' : '') +
@@ -1189,8 +1356,7 @@
 
     setView(
       topbar(title) +
-      '<div class="counter">' + (s.pos + 1) + ' / ' + s.questions.length + ' · Дұрыс: ' + s.correct + '</div>' +
-      '<div class="progress mt-s" aria-hidden="true"><span style="width:' + Math.round((s.pos / s.questions.length) * 100) + '%"></span></div>' +
+      tripHeader((s.pos + 1) + ' / ' + s.questions.length + ' · Дұрыс: ' + s.correct, s.pos, s.questions.length) +
       '<section class="card q-card mt">' +
         '<p class="q-prompt">' + Q_PROMPT[q.type] + '</p>' + main + body +
         '<div id="fb" aria-live="polite"></div>' +
@@ -1228,6 +1394,7 @@
     function settle(ok, chosen) {
       s.answered = true;
       S.stats.answered++;
+      addMiles(ok ? 10 : 1, !ok);
       if (ok) { S.stats.correct++; s.correct++; }
       else if (!s.mistakes.some(function (m) { return m === w.id; })) s.mistakes.push(w.id);
       // one Leitner update per word per test; a wrong answer always wins
@@ -1297,10 +1464,11 @@
       ds.score = ds.score == null ? pct : Math.max(ds.score, pct);
       save();
       finishedDay = checkDayDone(s.day);
+      if (finishedDay) addMiles(100, true);
     }
     markActivity();
     save();
-    session = { screen: 'result', from: s, pct: pct, finishedDay: finishedDay };
+    session = { screen: 'result', from: s, pct: pct, finishedDay: finishedDay, miles: s.miles || 0 };
     go('result');
   }
 
@@ -1317,14 +1485,15 @@
       topbar('Нәтиже') +
       '<div class="card center">' +
         '<div class="score" aria-label="Нәтиже ' + r.pct + ' пайыз">' + r.pct + '%</div>' +
-        '<p>' + s.correct + ' / ' + s.questions.length + ' дұрыс</p>' +
+        '<p class="mt-s">' + s.correct + ' / ' + s.questions.length + ' дұрыс</p>' +
+        (r.miles ? '<span class="miles-earned">✈ +' + fmtNum(r.miles) + ' миль</span>' : '') +
         '<p class="mt-s">' + msg + '</p>' +
         (r.finishedDay ? '<p class="mt"><b>🎉 ' + n + '-күн толық аяқталды!</b>' + (n < TOTAL_DAYS ? ' ' + (n + 1) + '-күн ашылды.' : ' 30 күндік бағдарлама аяқталды!') + '</p>' : '') +
         (s.mode === 'day' && !ds.lesson ? '<p class="mt muted small">Күнді аяқтау үшін таңғы сабақты да өт.</p>' : '') +
       '</div>' +
       (s.mistakes.length
-        ? '<h2 class="section">Қателер (' + s.mistakes.length + ')</h2><div class="card"><ul class="list">' + mistakes + '</ul></div>' +
-          '<button type="button" class="btn btn-primary btn-block mt" data-act="redo">🔁 Қателерді қайталау</button>'
+        ? '<button type="button" class="btn btn-primary btn-block mt" data-act="redo">🔁 Қателерді қайталау (' + s.mistakes.length + ')</button>' +
+          '<h2 class="section">Қателер</h2><div class="card"><ul class="list">' + mistakes + '</ul></div>'
         : '<p class="center mt">Бірде-бір қате жоқ! 👏</p>') +
       (n === TOTAL_DAYS && s.mode === 'final' ? '<button type="button" class="btn btn-soft btn-block mt" data-act="interview">🎙️ Сұхбат жаттығуына өту</button>' : '') +
       '<button type="button" class="btn btn-block mt" data-act="home">Басты бетке</button>'
@@ -1350,8 +1519,9 @@
     if (s.pos >= s.list.length) {
       setView(
         topbar('Сұхбат жаттығуы') +
-        '<div class="card center"><h2 style="font-size:24px">Жарайсың! 🎉</h2>' +
-        '<p class="mt">' + s.list.length + ' сұраққа жауап бердің. Күн сайын қайталасаң, сұхбатта сенімді боласың.</p></div>' +
+        '<section class="card break-card"><div class="big" aria-hidden="true">🎙️</div><h2>Жарайсың!</h2>' +
+        '<p>' + s.list.length + ' сұраққа жауап бердің. Күн сайын қайталасаң, сұхбатта сенімді боласың.</p>' +
+        (s.miles ? '<span class="miles-earned">✈ +' + fmtNum(s.miles) + ' миль</span>' : '') + '</section>' +
         '<div class="stack mt"><button type="button" class="btn btn-primary" data-act="again">Тағы 10 сұрақ</button>' +
         '<button type="button" class="btn" data-act="home">Басты бетке</button></div>'
       );
@@ -1363,8 +1533,7 @@
     var it = s.list[s.pos];
     setView(
       topbar('Сұхбат жаттығуы') +
-      '<div class="counter">Сұрақ ' + (s.pos + 1) + ' / ' + s.list.length + '</div>' +
-      '<div class="progress mt-s" aria-hidden="true"><span style="width:' + Math.round((s.pos / s.list.length) * 100) + '%"></span></div>' +
+      tripHeader('Сұрақ ' + (s.pos + 1) + ' / ' + s.list.length, s.pos, s.list.length) +
       '<section class="card mt">' +
         '<p class="q-prompt">Консул сұрайды:</p>' +
         '<p class="question-en" lang="en">' + esc(it.q) + '</p>' +
@@ -1390,7 +1559,7 @@
     on('ans', function () { speak(it.a, 0.9); });
     on('ans-slow', function () { speak(it.a, 0.6); });
     on('show', function () { s.shown = true; renderInterview(); speak(it.a, 0.9); });
-    on('next', function () { s.pos++; s.shown = false; renderInterview(); });
+    on('next', function () { s.pos++; s.shown = false; addMiles(15); renderInterview(); });
     bindFreeMic();
     bindMic('mic-ans', function () { return it.a; });
     if (!s.shown) setTimeout(function () { speak(it.q, 0.9); }, 300);
@@ -1398,7 +1567,7 @@
       if (e.key === 'Enter' && (!e.target || e.target.tagName !== 'BUTTON')) {
         e.preventDefault();
         if (!s.shown) { s.shown = true; renderInterview(); speak(it.a, 0.9); }
-        else { s.pos++; s.shown = false; renderInterview(); }
+        else { s.pos++; s.shown = false; addMiles(15); renderInterview(); }
       }
     };
   }
@@ -1454,7 +1623,7 @@
     var s = session;
     if (s.pos >= s.items.length) {
       setView(topbar('Айтылу жаттығуы') +
-        '<div class="card center"><h2 style="font-size:24px">Жарайсың! 🗣️</h2><p class="mt">Барлық сөз бен сөйлемді айтып шықтың.</p></div>' +
+        '<section class="card break-card"><div class="big" aria-hidden="true">🗣️</div><h2>Жарайсың!</h2><p>Барлық сөз бен сөйлемді айтып шықтың.</p></section>' +
         '<button type="button" class="btn btn-block mt" data-act="home">Басты бетке</button>');
       bindCommon();
       markActivity(); save();
@@ -1465,8 +1634,7 @@
     var target = it.kind === 'word' ? w.english : w.example;
     setView(
       topbar('Айтылу жаттығуы') +
-      '<div class="counter">' + (s.pos + 1) + ' / ' + s.items.length + ' · ' + (it.kind === 'word' ? 'Сөз' : 'Сөйлем') + '</div>' +
-      '<div class="progress mt-s" aria-hidden="true"><span style="width:' + Math.round((s.pos / s.items.length) * 100) + '%"></span></div>' +
+      tripHeader((s.pos + 1) + ' / ' + s.items.length + ' · ' + (it.kind === 'word' ? 'Сөз' : 'Сөйлем'), s.pos, s.items.length) +
       '<section class="card flash mt">' +
         (it.kind === 'word'
           ? picHtml(w) + '<div class="word" lang="en">' + esc(w.english) + '</div>' +
@@ -1531,9 +1699,19 @@
         '<button type="button" class="btn btn-primary" data-act="hard-test">📝 Тест</button></div>'
       : '<p class="muted">Әзірге қиын сөздер жоқ. Тест тапсырған сайын осында жиі қателескен сөздер шығады.</p>';
 
+    var mc = milesClass(S.miles || 0);
+    var toNext = mc.next ? mc.next.min - (S.miles || 0) : 0;
+    var classPct = mc.next ? Math.round(((S.miles || 0) - mc.cur.min) / (mc.next.min - mc.cur.min) * 100) : 100;
     setView(
       topbar('Прогресс') +
-      '<div class="stats">' +
+      '<section class="card class-card">' +
+        '<span class="label">Ұшу милі · ' + fmtNum(S.miles || 0) + '</span>' +
+        '<div class="class-name">' + esc(mc.cur.name) + '</div>' +
+        '<div class="daybar" aria-hidden="true"><span style="width:' + classPct + '%"></span></div>' +
+        '<p>' + (mc.next ? '«' + esc(mc.next.name) + '» класына дейін ' + fmtNum(toNext) + ' миль қалды.' : 'Ең жоғары класс! 🥂') +
+        ' Миль жаңа сөз, дұрыс жауап және сұхбат жаттығуы үшін беріледі.</p>' +
+      '</section>' +
+      '<div class="stats mt">' +
         '<div class="card stat"><div class="v">🔥 ' + streak() + '</div><div class="l">күн қатарынан</div></div>' +
         '<div class="card stat"><div class="v">' + learned + '</div><div class="l">үйренілген сөз / ' + WORDS.length + '</div></div>' +
         '<div class="card stat"><div class="v">' + acc + '%</div><div class="l">тест дәлдігі</div></div>' +
@@ -1542,9 +1720,9 @@
       '<h2 class="section">Қораптар бойынша (басталған: ' + started + ')</h2>' +
       '<div class="card boxes">' + boxes + '</div>' +
       '<p class="small muted mt-s">1-қорап — бүгін, 2 — 1 күннен кейін, 3 — 3 күннен, 4 — 7 күннен, 5 — 14 күннен кейін қайталанады.</p>' +
-      '<h2 class="section">30 күндік күнтізбе</h2>' +
+      '<h2 class="section">Паспорт мөрлері · 30 күн</h2>' +
       '<div class="card"><div class="cal">' + cal + '</div>' +
-        '<div class="legend"><span><i style="background:var(--ok)"></i>аяқталды</span><span><i style="outline:2px solid var(--accent);background:var(--surface)"></i>ағымдағы күн</span><span><i style="background:var(--surface-2)"></i>жабық</span></div>' +
+        '<div class="legend"><span><i style="background:var(--ok-soft);border:2px solid var(--ok)"></i>аяқталды</span><span><i style="border:2px dashed var(--accent)"></i>ағымдағы күн</span><span><i style="background:var(--surface-2);border:2px solid var(--line)"></i>жабық</span></div>' +
         '<p class="small muted mt-s">Ашық күнді басып, соған ауысуға болады.</p></div>' +
       '<h2 class="section">Қиын сөздер</h2>' + hardHtml +
       '<h2 class="section">Баптаулар</h2>' +
@@ -1594,7 +1772,14 @@
     });
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       window.addEventListener('load', function () {
+        var hadController = !!navigator.serviceWorker.controller;
         navigator.serviceWorker.register('sw.js').catch(function () { /* offline cache unavailable */ });
+        // When a new version takes over, reload once so the phone shows it right away.
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (!hadController || window.__w30reloaded) return;
+          window.__w30reloaded = true;
+          if (!session) location.reload();
+        });
       });
     }
   }

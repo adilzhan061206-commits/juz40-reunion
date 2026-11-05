@@ -1,5 +1,5 @@
 /* Offline cache for the 625-words app. Scope: this folder. */
-var VERSION = 'w30-v2';
+var VERSION = 'w30-v3';
 var SHELL = VERSION + '-shell';
 var IMAGES = 'w30-images';
 var FILES = ['./', 'index.html', 'style.css', 'app.js', 'words.json', 'manifest.webmanifest', 'icon.svg',
